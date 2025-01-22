@@ -51,6 +51,10 @@ classdef RISISAC_V2X_Sim < handle
             % Initialize channels
             obj.initializeChannels();
         end
+
+        function nb = get_Nb(obj)
+            nb = obj.Nb;
+        end
         
         function initializeChannels(obj)
             % Initialize direct channel
@@ -203,6 +207,7 @@ classdef RISISAC_V2X_Sim < handle
             for k = 1:obj.Ns
                 H_k = H_eff; % Consider frequency-dependent channel
                 J_k = H_k * (precoder * precoder') * H_k';
+                F = zeros(size(real(J_k))); % Initialize F to match J_k dimensions
                 F = F + real(J_k);
             end
             peb = sqrt(trace(inv(F)));

@@ -24,7 +24,7 @@ class RISISACTrainer:
         self.agent = FLDDPG(
             state_dim=state_dim,
             action_dim=action_dim,
-            hidden_dim=256,
+            hidden_dims=[256, 256],
             buffer_size=1000000,
             batch_size=64,
             gamma=0.99,
@@ -33,18 +33,40 @@ class RISISACTrainer:
             critic_lr=1e-3
         )
         
+    def calculate_metrics(precoder, sim):
+        precoder_matlab = matlab.double(precoder.tolist())
+        rate, peb = sim.calculatePerformanceMetrics(precoder_matlab, nargout=2)
+        return float(rate), float(peb)
+    
+    @staticmethod
+    def create_simple_precoder(self, Nb):
+        """Create a simple uniform precoder matrix"""
+        return np.eye(round(Nb)) / np.sqrt(Nb)
+    
+    def process_state(self, matlab_state):
+        """Convert MATLAB state to proper numpy array format"""
+        return np.array(matlab_state).flatten()
+        
     def train(self, num_episodes=1000, max_steps=200):
         best_reward = float('-inf')
         episode_rewards = []
-        
+        self.peb_values = []
+        self.episode_numbers = []
+        peb_history = []
         print("Starting training...")
+        Nb = self.eng.get_Nb(self.sim)
         for episode in range(num_episodes):
             # Reset environment
             # state = state.flatten() if len(state.shape) > 1 else state
             matlab_state = self.eng.reset(self.sim)
             state = np.array(self.eng.reset(self.sim))
-            print("Initial state shape: {state.shape}")
+            print(f"Initial state shape: {state.shape}")
             episode_reward = 0
+            precoder = self.create_simple_precoder(self, Nb)
+            
+            current_peb = self.eng.calculatePerformanceMetrics(self.sim, precoder)
+            self.peb_values.append(current_peb)
+            self.episode_numbers.append(episode+1)
             
             for step in range(max_steps):
                 # Select action using DDPG
@@ -58,7 +80,7 @@ class RISISACTrainer:
                 
                 # Convert MATLAB outputs to numpy arrays
                 next_state = self.process_state(next_matlab_state)
-                reward = float(reward)
+                reward = float(abs(reward))
                 done = bool(done)
                 
                 # Store transition in replay buffer
@@ -111,7 +133,7 @@ class RISISACTrainer:
                 next_state, reward, done = self.eng.step(self.sim, matlab_action, nargout=3)
                 
                 state = np.array(next_state)
-                episode_reward += float(reward)
+                episode_reward += float(abs(reward))
                 step += 1
             
             print(f"Test Episode {episode + 1}: Reward = {episode_reward:.3f}")
@@ -127,8 +149,7 @@ if __name__ == "__main__":
     try:
         # Train the agent
         print("Starting training process...")
-        rewards = trainer.train(num_episodes=1000, max_steps=200)
-        
+        rewards = trainer.train(num_episodes=100000, max_steps=10000)
         # Test the trained agent
         print("\nTesting trained agent...")
         trainer.test(num_episodes=10)
@@ -141,6 +162,15 @@ if __name__ == "__main__":
         plt.xlabel('Episode')
         plt.ylabel('Reward')
         plt.savefig('training_rewards.png')
+        plt.show()
+        
+        plt.figure(figsize=(10, 5))
+        plt.plot(trainer.episode_numbers, trainer.peb_values)
+        plt.title('Performance Error Bound (PEB) over Episodes')
+        plt.xlabel('Episode')
+        plt.ylabel('PEB Value')
+        plt.grid(True)
+        plt.savefig('peb_values.png')
         plt.show()
         
     finally:
