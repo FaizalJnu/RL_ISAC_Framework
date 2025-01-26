@@ -195,22 +195,415 @@ classdef RISISAC_V2X_Sim < handle
             % Check if episode is done
             done = obj.isEpisodeDone();
         end
-        
-        function [rate, peb] = calculatePerformanceMetrics(obj, precoder)
-            % Calculate achievable rate
-            H_eff = obj.H_d + obj.H_rt * obj.Phi * obj.H_br;
-            SNR = 20; % dB
-            rate = log2(det(eye(obj.Nt) + 10^(SNR/10) * H_eff * (precoder * precoder') * H_eff'));
+
+        function [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj)
+            % Extract coordinates
+            xb = obj.bs_loc(1);    yb = obj.bs_loc(2);    zb = obj.bs_loc(3);
+            xr = obj.ris_loc(1);   yr = obj.ris_loc(2);   zr = obj.ris_loc(3);
+            xt = obj.target_loc(1); yt = obj.target_loc(2); zt = obj.target_loc(3);
             
-            % Calculate Position Error Bound (PEB)
-            F = zeros(3,3); % Fisher Information Matrix
-            for k = 1:obj.Ns
-                H_k = H_eff; % Consider frequency-dependent channel
-                J_k = H_k * (precoder * precoder') * H_k';
-                F = zeros(size(real(J_k))); % Initialize F to match J_k dimensions
-                F = F + real(J_k);
+            % Speed of light
+            c = 3e8;
+            
+            % Calculate 3D Euclidean distances
+            L1 = sqrt((xb - xr)^2 + (yb - yr)^2 + (zb - zr)^2);
+            L2 = sqrt((xr - xt)^2 + (yr - yt)^2 + zr^2);
+            L3 = sqrt((xb - xt)^2 + (yb - yt)^2 + zb^2);
+            
+            % Calculate 2D (X-Y plane) projections
+            L_proj1 = sqrt((xb - xr)^2 + (yb - yr)^2);
+            L_proj2 = sqrt((xr - xt)^2 + (yr - yt)^2);
+            L_proj3 = sqrt((xb - xt)^2 + (yb - yt)^2);
+            
+            % Calculate signal delays
+            delays.line_of_sight = L3 / c;
+            delays.non_line_of_sight = (L1 + L2) / c;
+            
+            % Calculate angles
+            % BS to RIS angles
+            angles.bs_to_ris.azimuth = asin((zb - zr) / L1);
+            angles.bs_to_ris.elevation_azimuth = asin((xb - xr) / L_proj1);
+            angles.bs_to_ris.elevation_angle = acos((zb - zr) / L1);
+            
+            % RIS to Target angles
+            angles.ris_to_target.aoa = asin(zr / L2);
+            angles.ris_to_target.azimuth = acos((yr - yt) / L_proj2);
+            angles.ris_to_target.elevation_angle = acos(zr / L2);
+        end
+        
+        function [rate, peb, additionalMetrics] = calculatePerformanceMetrics(obj, precoder)
+            % Compute geometric parameters
+            [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj);
+            
+            % Calculate effective channel
+            H_eff = obj.H_d + obj.H_rt * obj.Phi * obj.H_br;
+            
+            % SNR calculation
+            SNR = 20; % dB
+            gamma = 10^(SNR/10);
+            
+            % Rate calculation (closer to the problem formulation)
+            rate = log2(1 + gamma * det(eye(obj.Nt) + H_eff * (precoder * precoder') * H_eff') / trace(H_eff * (precoder * precoder') * H_eff'));
+            
+            % Compute Transformation Matrix and Fisher Information Matrix
+            [T, dParams] = computeTransformationMatrix(obj);
+            
+            % Detailed Fisher Information Matrix computation
+            try
+                [J, Jzao, T] = computeFisherInformationMatrix(obj, precoder, H_eff);
+                
+                % Position Error Bound calculation
+                CRLB = inv(J);
+                peb = sqrt(trace(CRLB(1:2, 1:2))); % Focus on x-y positioning
+            catch
+                % Fallback to previous simple FIM calculation
+                % Ensure F is the same size as H_eff * (precoder * precoder') * H_eff'
+                F = zeros(size(H_eff * (precoder * precoder') * H_eff'));
+                
+                for k = 1:obj.Ns
+                    H_k = H_eff; % Consider frequency-dependent channel
+                    J_k = H_k * (precoder * precoder') * H_k';
+                    
+                    % Ensure J_k matches the size of F before addition
+                    if size(J_k) ~= size(F)
+                        warning('Size mismatch in Fisher Information Matrix calculation');
+                        J_k = zeros(size(F)); % Fallback to zero matrix if sizes don't match
+                    end
+                    
+                    F = F + real(J_k);
+                end
+                
+                peb = sqrt(trace(inv(F)));
             end
-            peb = sqrt(trace(inv(F)));
+            
+            % Additional performance metrics
+            additionalMetrics = struct(...
+                'Distances', struct(...
+                    'L1', L1, ...
+                    'L2', L2, ...
+                    'L3', L3, ...
+                    'L_proj1', L_proj1, ...
+                    'L_proj2', L_proj2, ...
+                    'L_proj3', L_proj3 ...
+                ), ...
+                'Delays', delays, ...
+                'Angles', angles, ...
+                'SNR', SNR, ...
+                'Gamma', gamma ...
+            );
+        end
+        
+        function [T, dParams] = computeTransformationMatrix(obj)
+            % Compute initial geometric parameters
+            [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj);
+            
+            % Initialize transformation matrix
+            T = zeros(2, 7);
+            
+            % Structure to store derivatives of parameters
+            dParams = struct();
+            
+            % Compute derivatives with respect to x and y
+            [dParams.L1_dx, dParams.L1_dy] = computeDistanceDerivatives(obj, 'L1');
+            [dParams.L2_dx, dParams.L2_dy] = computeDistanceDerivatives(obj, 'L2');
+            [dParams.L3_dx, dParams.L3_dy] = computeDistanceDerivatives(obj, 'L3');
+            
+            % Compute derivatives of time delays
+            [dParams.tau_l_dx, dParams.tau_l_dy] = computeTimeDelayDerivatives(obj, L3, 'line_of_sight');
+            [dParams.tau_nl_dx, dParams.tau_nl_dy] = computeTimeDelayDerivatives(obj, L1, L2, 'non_line_of_sight');
+            
+            % Compute derivatives of various angles
+            [dParams.psi_rt_dx, dParams.psi_rt_dy] = computeAngleDerivatives(obj, 'ris_to_target_aoa');
+            [dParams.phi_a_rt_dx, dParams.phi_a_rt_dy] = computeAngleDerivatives(obj, 'ris_to_target_azimuth');
+            [dParams.phi_e_rt_dx, dParams.phi_e_rt_dy] = computeAngleDerivatives(obj, 'ris_to_target_elevation');
+            [dParams.psi_bt_dx, dParams.psi_bt_dy] = computeAngleDerivatives(obj, 'bs_to_target_transmit');
+            [dParams.psi_tb_dx, dParams.psi_tb_dy] = computeAngleDerivatives(obj, 'bs_to_target_receive');
+            
+            % Populate transformation matrix T according to the paper's formulation
+            % T is a 2x7 matrix of partial derivatives with respect to x and y
+            T = [
+                dParams.tau_l_dx,     dParams.tau_nl_dx,     dParams.psi_rt_dx,     dParams.phi_a_rt_dx,     dParams.phi_e_rt_dx,     dParams.psi_bt_dx,     dParams.psi_tb_dx;
+                dParams.tau_l_dy,     dParams.tau_nl_dy,     dParams.psi_rt_dy,     dParams.phi_a_rt_dy,     dParams.phi_e_rt_dy,     dParams.psi_bt_dy,     dParams.psi_tb_dy
+            ];
+        end
+        
+        function [dx, dy] = computeDistanceDerivatives(obj, distanceType)
+            % Numerical differentiation of distances
+            epsilon = 1e-8;  % Small perturbation
+            
+            % Original location
+            orig_loc = obj.target_loc;
+            
+            % Compute derivatives using central difference method
+            dx_perturb_pos = orig_loc;
+            dx_perturb_pos(1) = orig_loc(1) + epsilon;
+            dx_perturb_neg = orig_loc;
+            dx_perturb_neg(1) = orig_loc(1) - epsilon;
+            
+            dy_perturb_pos = orig_loc;
+            dy_perturb_pos(2) = orig_loc(2) + epsilon;
+            dy_perturb_neg = orig_loc;
+            dy_perturb_neg(2) = orig_loc(2) - epsilon;
+            
+            % Compute distances
+            switch distanceType
+                case 'L1'  % BS to RIS distance
+                    dist_orig = norm(obj.bs_loc - obj.ris_loc);
+                    dist_dx_pos = norm(obj.bs_loc - [dx_perturb_pos(1), obj.ris_loc(2), obj.ris_loc(3)]);
+                    dist_dx_neg = norm(obj.bs_loc - [dx_perturb_neg(1), obj.ris_loc(2), obj.ris_loc(3)]);
+                    dist_dy_pos = norm(obj.bs_loc - [obj.ris_loc(1), dy_perturb_pos(2), obj.ris_loc(3)]);
+                    dist_dy_neg = norm(obj.bs_loc - [obj.ris_loc(1), dy_perturb_neg(2), obj.ris_loc(3)]);
+                
+                case 'L2'  % RIS to Target distance
+                    dist_orig = norm(obj.ris_loc - obj.target_loc);
+                    dist_dx_pos = norm(obj.ris_loc - [dx_perturb_pos(1), obj.target_loc(2), obj.target_loc(3)]);
+                    dist_dx_neg = norm(obj.ris_loc - [dx_perturb_neg(1), obj.target_loc(2), obj.target_loc(3)]);
+                    dist_dy_pos = norm(obj.ris_loc - [obj.target_loc(1), dy_perturb_pos(2), obj.target_loc(3)]);
+                    dist_dy_neg = norm(obj.ris_loc - [obj.target_loc(1), dy_perturb_neg(2), obj.target_loc(3)]);
+                
+                case 'L3'  % BS to Target distance
+                    dist_orig = norm(obj.bs_loc - obj.target_loc);
+                    dist_dx_pos = norm(obj.bs_loc - [dx_perturb_pos(1), obj.target_loc(2), obj.target_loc(3)]);
+                    dist_dx_neg = norm(obj.bs_loc - [dx_perturb_neg(1), obj.target_loc(2), obj.target_loc(3)]);
+                    dist_dy_pos = norm(obj.bs_loc - [obj.target_loc(1), dy_perturb_pos(2), obj.target_loc(3)]);
+                    dist_dy_neg = norm(obj.bs_loc - [obj.target_loc(1), dy_perturb_neg(2), obj.target_loc(3)]);
+            end
+            
+            % Central difference method for derivatives
+            dx = (dist_dx_pos - dist_dx_neg) / (2 * epsilon);
+            dy = (dist_dy_pos - dist_dy_neg) / (2 * epsilon);
+        end
+        
+        function [dx, dy] = computeTimeDelayDerivatives(obj, varargin)
+            % Numerical differentiation of time delays
+            epsilon = 1e-8;  % Small perturbation
+            c = 3e8;  % Speed of light
+            
+            % Original location
+            orig_loc = obj.target_loc;
+            
+            % Compute derivatives using central difference method
+            dx_perturb_pos = orig_loc;
+            dx_perturb_pos(1) = orig_loc(1) + epsilon;
+            dx_perturb_neg = orig_loc;
+            dx_perturb_neg(1) = orig_loc(1) - epsilon;
+            
+            dy_perturb_pos = orig_loc;
+            dy_perturb_pos(2) = orig_loc(2) + epsilon;
+            dy_perturb_neg = orig_loc;
+            dy_perturb_neg(2) = orig_loc(2) - epsilon;
+            
+            % Handle different delay scenarios
+            if length(varargin) == 2 && strcmp(varargin{2}, 'line_of_sight')
+                % Line of sight delay (L3/c)
+                L3_orig = norm(obj.bs_loc - orig_loc);
+                tau_l_orig = L3_orig / c;
+                
+                L3_dx_pos = norm(obj.bs_loc - dx_perturb_pos);
+                L3_dx_neg = norm(obj.bs_loc - dx_perturb_neg);
+                L3_dy_pos = norm(obj.bs_loc - dy_perturb_pos);
+                L3_dy_neg = norm(obj.bs_loc - dy_perturb_neg);
+                
+                dx = (L3_dx_pos/c - L3_dx_neg/c) / (2 * epsilon);
+                dy = (L3_dy_pos/c - L3_dy_neg/c) / (2 * epsilon);
+            
+            elseif length(varargin) == 3 && strcmp(varargin{3}, 'non_line_of_sight')
+                % Non-line of sight delay (L1 + L2)/c
+                L1_orig = norm(obj.bs_loc - obj.ris_loc);
+                L2_orig = norm(obj.ris_loc - orig_loc);
+                tau_nl_orig = (L1_orig + L2_orig) / c;
+                
+                % Compute perturbed distances
+                L1_dx_pos = norm(obj.bs_loc - obj.ris_loc);
+                L2_dx_pos = norm(obj.ris_loc - dx_perturb_pos);
+                L1_dx_neg = norm(obj.bs_loc - obj.ris_loc);
+                L2_dx_neg = norm(obj.ris_loc - dx_perturb_neg);
+                
+                L1_dy_pos = norm(obj.bs_loc - obj.ris_loc);
+                L2_dy_pos = norm(obj.ris_loc - dy_perturb_pos);
+                L1_dy_neg = norm(obj.bs_loc - obj.ris_loc);
+                L2_dy_neg = norm(obj.ris_loc - dy_perturb_neg);
+                
+                dx = ((L1_dx_pos + L2_dx_pos)/c - (L1_dx_neg + L2_dx_neg)/c) / (2 * epsilon);
+                dy = ((L1_dy_pos + L2_dy_pos)/c - (L1_dy_neg + L2_dy_neg)/c) / (2 * epsilon);
+            else
+                error('Invalid time delay computation');
+            end
+        end
+        
+        function [dx, dy] = computeAngleDerivatives(obj, angleType)
+            % Numerical differentiation of angles
+            epsilon = 1e-8;  % Small perturbation
+            
+            % Original location
+            orig_loc = obj.target_loc;
+            
+            % Compute derivatives using central difference method
+            dx_perturb_pos = orig_loc;
+            dx_perturb_pos(1) = orig_loc(1) + epsilon;
+            
+            dy_perturb_pos = orig_loc;
+            dy_perturb_pos(2) = orig_loc(2) + epsilon;
+            
+            % Compute angles based on different types
+            switch angleType
+                case 'ris_to_target_aoa'
+                    % Angle of Arrival at RIS-target link
+                    dx = (obj.computeAngleDifference(obj.ris_loc, dx_perturb_pos, 'aoa') - ...
+                          obj.computeAngleDifference(obj.ris_loc, orig_loc, 'aoa')) / epsilon;
+                    dy = (obj.computeAngleDifference(obj.ris_loc, dy_perturb_pos, 'aoa') - ...
+                          obj.computeAngleDifference(obj.ris_loc, orig_loc, 'aoa')) / epsilon;
+                
+                case 'ris_to_target_azimuth'
+                    dx = (obj.computeAngleDifference(obj.ris_loc, dx_perturb_pos, 'azimuth') - ...
+                          obj.computeAngleDifference(obj.ris_loc, orig_loc, 'azimuth')) / epsilon;
+                    dy = (obj.computeAngleDifference(obj.ris_loc, dy_perturb_pos, 'azimuth') - ...
+                          obj.computeAngleDifference(obj.ris_loc, orig_loc, 'azimuth')) / epsilon;
+                
+                case 'ris_to_target_elevation'
+                    dx = (obj.computeAngleDifference(obj.ris_loc, dx_perturb_pos, 'elevation') - ...
+                          obj.computeAngleDifference(obj.ris_loc, orig_loc, 'elevation')) / epsilon;
+                    dy = (obj.computeAngleDifference(obj.ris_loc, dy_perturb_pos, 'elevation') - ...
+                          obj.computeAngleDifference(obj.ris_loc, orig_loc, 'elevation')) / epsilon;
+                
+                case 'bs_to_target_transmit'
+                    dx = (obj.computeAngleDifference(obj.bs_loc, dx_perturb_pos, 'transmit') - ...
+                          obj.computeAngleDifference(obj.bs_loc, orig_loc, 'transmit')) / epsilon;
+                    dy = (obj.computeAngleDifference(obj.bs_loc, dy_perturb_pos, 'transmit') - ...
+                          obj.computeAngleDifference(obj.bs_loc, orig_loc, 'transmit')) / epsilon;
+                
+                case 'bs_to_target_receive'
+                    dx = (obj.computeAngleDifference(obj.bs_loc, dx_perturb_pos, 'receive') - ...
+                          obj.computeAngleDifference(obj.bs_loc, orig_loc, 'receive')) / epsilon;
+                    dy = (obj.computeAngleDifference(obj.bs_loc, dy_perturb_pos, 'receive') - ...
+                          obj.computeAngleDifference(obj.bs_loc, orig_loc, 'receive')) / epsilon;
+                
+                otherwise
+                    error('Invalid angle type');
+            end
+        end
+        
+        function angle_diff = computeAngleDifference(obj, ref_loc, target_loc, angleType)
+            % Ensure inputs are column vectors
+            ref_loc = ref_loc(:);
+            target_loc = target_loc(:);
+            
+            % Pad with zeros if needed to ensure 3D
+            if length(ref_loc) < 3
+                ref_loc(3) = 0;
+            end
+            if length(target_loc) < 3
+                target_loc(3) = 0;
+            end
+            
+            % Compute angle differences using different methods
+            switch angleType
+                case 'aoa'
+                    % Angle of Arrival
+                    dist = norm(ref_loc - target_loc);
+                    if dist == 0
+                        angle_diff = 0;
+                    else
+                        angle_diff = asin(ref_loc(3) / dist);
+                    end
+                
+                case 'azimuth'
+                    % Azimuth angle
+                    dist_2d = norm(ref_loc(1:2) - target_loc(1:2));
+                    if dist_2d == 0
+                        angle_diff = 0;
+                    else
+                        angle_diff = acos((ref_loc(2) - target_loc(2)) / dist_2d);
+                    end
+                
+                case 'elevation'
+                    % Elevation angle
+                    dist = norm(ref_loc - target_loc);
+                    if dist == 0
+                        angle_diff = 0;
+                    else
+                        angle_diff = acos(ref_loc(3) / dist);
+                    end
+                
+                case 'transmit'
+                    % Transmit angle
+                    dist = norm(ref_loc - target_loc);
+                    if dist == 0
+                        angle_diff = 0;
+                    else
+                        angle_diff = acos(ref_loc(3) / dist);
+                    end
+                
+                case 'receive'
+                    % Receive angle
+                    dist = norm(ref_loc - target_loc);
+                    if dist == 0
+                        angle_diff = 0;
+                    else
+                        angle_diff = asin(ref_loc(3) / dist);
+                    end
+                
+                otherwise
+                    error('Invalid angle type');
+            end
+        end
+        
+        function [J, Jzao, T] = computeFisherInformationMatrix(obj, precoder, H_eff)
+            % Parameters
+            Pb = 1;  % Transmit power (placeholder)
+            sigma_s = 1;  % Noise variance (placeholder)
+            B = obj.B;  % Bandwidth
+            N = obj.Ns;  % Number of subcarriers
+            lambda = 3e8 / obj.fc;  % Wavelength
+            
+            % Compute geometric parameters
+            [~, ~, ~, ~, ~, ~, delays, angles] = computeGeometricParameters(obj);
+            
+            % Estimated parameter vector
+            zeta = [
+                delays.line_of_sight, 
+                delays.non_line_of_sight, 
+                angles.ris_to_target.aoa, 
+                angles.ris_to_target.azimuth, 
+                angles.ris_to_target.elevation_angle, 
+                computeBSTargetAngles(obj)
+            ];
+            
+            % Initialize Jzao matrix
+            Jzao = zeros(7, 7);
+            
+            % Compute transformation matrix T
+            [T, dParams] = computeTransformationMatrix(obj);
+            
+            % Compute Jzao using subcarrier-based approach
+            for n = 1:N
+                % Effective channel for this subcarrier
+                H_k = H_eff;  % In practice, this might vary with frequency
+                
+                % Compute local Fisher Information Matrix contribution
+                J_k = H_k * (precoder * precoder') * H_k';
+                
+                % Accumulate contributions (simplified approach)
+                % In a full implementation, you'd use more complex derivatives
+                for i = 1:7
+                    for j = 1:7
+                        % Placeholder for more complex derivative computations
+                        Jzao(i,j) = Jzao(i,j) + 2*Pb/sigma_s * real(J_k(i,j));
+                    end
+                end
+            end
+            
+            % Compute final Fisher Information Matrix
+            J = T * Jzao * T';
+        end
+        
+        function [psibt, psitb] = computeBSTargetAngles(obj)
+            % Compute BS-target transmitting and receiving angles
+            L3 = norm(obj.bs_loc - obj.target_loc);
+            zb = obj.bs_loc(3);
+            
+            psibt = acos(zb / L3);
+            psitb = asin(zb / L3);
         end
         
         function reward = calculateReward(obj, rate, peb)
