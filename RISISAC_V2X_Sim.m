@@ -184,6 +184,7 @@ classdef RISISAC_V2X_Sim < handle
             
             % Calculate performance metrics
             precoder = eye(obj.Nb) / sqrt(obj.Nb);  % Simple precoder
+
             [rate, peb] = obj.calculatePerformanceMetrics(precoder);
             
             % Calculate reward
@@ -249,32 +250,40 @@ classdef RISISAC_V2X_Sim < handle
             [T, dParams] = computeTransformationMatrix(obj);
             
             % Detailed Fisher Information Matrix computation
-            try
-                [J, Jzao, T] = computeFisherInformationMatrix(obj, precoder, H_eff);
+            [J, Jzao, T] = computeFisherInformationMatrix(obj, precoder, H_eff);
                 
-                % Position Error Bound calculation
-                CRLB = inv(J);
-                peb = sqrt(trace(CRLB(1:2, 1:2))); % Focus on x-y positioning
-            catch
-                % Fallback to previous simple FIM calculation
-                % Ensure F is the same size as H_eff * (precoder * precoder') * H_eff'
-                F = zeros(size(H_eff * (precoder * precoder') * H_eff'));
+            % Position Error Bound calculation
+            CRLB = inv(J);
+
+            peb = sqrt(trace(CRLB(1:2, 1:2))); % Focus on x-y positioning
+
+            % try
+            %     [J, Jzao, T] = computeFisherInformationMatrix(obj, precoder, H_eff);
                 
-                for k = 1:obj.Ns
-                    H_k = H_eff; % Consider frequency-dependent channel
-                    J_k = H_k * (precoder * precoder') * H_k';
+            %     % Position Error Bound calculation
+            %     CRLB = inv(J);
+
+            %     peb = sqrt(trace(CRLB(1:2, 1:2))); % Focus on x-y positioning
+            % catch
+            %     % Fallback to previous simple FIM calculation
+            %     % Ensure F is the same size as H_eff * (precoder * precoder') * H_eff'
+            %     F = zeros(size(H_eff * (precoder * precoder') * H_eff'));
+                
+            %     for k = 1:obj.Ns
+            %         H_k = H_eff; % Consider frequency-dependent channel
+            %         J_k = H_k * (precoder * precoder') * H_k';
                     
-                    % Ensure J_k matches the size of F before addition
-                    if size(J_k) ~= size(F)
-                        warning('Size mismatch in Fisher Information Matrix calculation');
-                        J_k = zeros(size(F)); % Fallback to zero matrix if sizes don't match
-                    end
+            %         % Ensure J_k matches the size of F before addition
+            %         if size(J_k) ~= size(F)
+            %             warning('Size mismatch in Fisher Information Matrix calculation');
+            %             J_k = zeros(size(F)); % Fallback to zero matrix if sizes don't match
+            %         end
                     
-                    F = F + real(J_k);
-                end
+            %         F = F + real(J_k);
+            %     end
                 
-                peb = sqrt(trace(inv(F)));
-            end
+            %     peb = sqrt(trace(inv(F)));
+            % end
             
             % Additional performance metrics
             additionalMetrics = struct(...
@@ -561,11 +570,11 @@ classdef RISISAC_V2X_Sim < handle
             
             % Estimated parameter vector
             zeta = [
-                delays.line_of_sight, 
-                delays.non_line_of_sight, 
-                angles.ris_to_target.aoa, 
-                angles.ris_to_target.azimuth, 
-                angles.ris_to_target.elevation_angle, 
+                delays.line_of_sight; 
+                delays.non_line_of_sight; 
+                angles.ris_to_target.aoa; 
+                angles.ris_to_target.azimuth; 
+                angles.ris_to_target.elevation_angle; 
                 computeBSTargetAngles(obj)
             ];
             
@@ -575,6 +584,15 @@ classdef RISISAC_V2X_Sim < handle
             % Compute transformation matrix T
             [T, dParams] = computeTransformationMatrix(obj);
             
+            % Calculate dimensions of J_k before the loop
+            H_k = H_eff;  % In practice, this might vary with frequency
+            J_k_temp = H_k * (precoder * precoder') * H_k';
+            [J_k_rows, J_k_cols] = size(J_k_temp);
+            
+            % Create a mapping matrix to handle dimension mismatch
+            mapping_matrix = zeros(7, max(J_k_rows, J_k_cols));
+            mapping_matrix(1:min(7, J_k_rows), 1:min(7, J_k_cols)) = 1;
+            
             % Compute Jzao using subcarrier-based approach
             for n = 1:N
                 % Effective channel for this subcarrier
@@ -583,12 +601,15 @@ classdef RISISAC_V2X_Sim < handle
                 % Compute local Fisher Information Matrix contribution
                 J_k = H_k * (precoder * precoder') * H_k';
                 
-                % Accumulate contributions (simplified approach)
-                % In a full implementation, you'd use more complex derivatives
+                % Accumulate contributions with dimension handling
                 for i = 1:7
                     for j = 1:7
-                        % Placeholder for more complex derivative computations
-                        Jzao(i,j) = Jzao(i,j) + 2*Pb/sigma_s * real(J_k(i,j));
+                        if i <= size(J_k, 1) && j <= size(J_k, 2)
+                            Jzao(i,j) = Jzao(i,j) + 2*Pb/sigma_s * real(J_k(i,j));
+                        else
+                            % For indices beyond J_k dimensions, add zero contribution
+                            Jzao(i,j) = Jzao(i,j) + 0;
+                        end
                     end
                 end
             end

@@ -149,7 +149,7 @@ if __name__ == "__main__":
     try:
         # Train the agent
         print("Starting training process...")
-        rewards = trainer.train(num_episodes=100000, max_steps=10000)
+        rewards = trainer.train(num_episodes=300, max_steps=10000)
         # Test the trained agent
         print("\nTesting trained agent...")
         trainer.test(num_episodes=10)
