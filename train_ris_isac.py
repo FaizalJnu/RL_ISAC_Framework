@@ -8,19 +8,23 @@ class RISISACTrainer:
         # Start MATLAB engine
         print("Starting MATLAB engine...")
         self.eng = matlab.engine.start_matlab()
-        
+        self.eng.addpath('/Users/faizal/work/RL_ISAC_Framework', nargout=0)  
+        self.eng.savepath(nargout=0)  
+
         # Initialize MATLAB simulation
-        self.sim = self.eng.RISISAC_V2X_Sim()
+        self.sim = self.eng.RISISAC_V2X_Sim(nargout=1)
+        # print(self.eng.methods(self.sim))
+        # print(type(self.sim))
+        print(dir(self.sim))
         
         # Get state and action dimensions
         initial_state = self.eng.getState(self.sim)
         initial_state = np.array(initial_state).flatten()
-        state_dim = len(initial_state)  # MATLAB returns 2D array
-        # Action space: RIS phases (64) + throttle (1) + steering (1)
-        action_dim = 64 + 2 
+        state_dim = len(initial_state)
+        action_dim = 64 + 2  # RIS phases (64) + throttle (1) + steering (1)
         print(f"Initializing FLDDPG with state_dim={state_dim}, action_dim={action_dim}")
         
-        # Initialize DDPG agent
+        # Initialize DDPG agent with improved parameters
         self.agent = FLDDPG(
             state_dim=state_dim,
             action_dim=action_dim,
@@ -30,14 +34,39 @@ class RISISACTrainer:
             gamma=0.99,
             tau=0.001,
             actor_lr=1e-4,
-            critic_lr=1e-3
+            critic_lr=1e-3,
+            lr_decay_rate=0.995,
+            min_lr=1e-6
         )
         
-    def calculate_metrics(precoder, sim):
+        # Initialize metrics tracking
+        self.metrics = {
+            'episode_rewards': [],
+            'peb_values': [],
+            'actor_losses': [],
+            'critic_losses': [],
+            'learning_rates': []
+        }
+        
+        # Best metrics tracking
+        self.best_metrics = {
+            'reward': float('-inf'),
+            'peb': float('inf'),
+            'reward_episode': 0,
+            'peb_episode': 0
+        }
+    
+    # @staticmethod
+    # def calculate_metrics(precoder, sim):
+    #     precoder_matlab = matlab.double(precoder.tolist())
+    #     rate, peb = sim.calculatePerformanceMetrics(precoder_matlab, nargout=2)
+    #     return float(rate), float(peb)
+    
+    def calculate_metrics(self, precoder, sim):  # Add self parameter
         precoder_matlab = matlab.double(precoder.tolist())
         rate, peb = sim.calculatePerformanceMetrics(precoder_matlab, nargout=2)
         return float(rate), float(peb)
-    
+
     @staticmethod
     def create_simple_precoder(self, Nb):
         """Create a simple uniform precoder matrix"""
@@ -46,77 +75,143 @@ class RISISACTrainer:
     def process_state(self, matlab_state):
         """Convert MATLAB state to proper numpy array format"""
         return np.array(matlab_state).flatten()
+    
+    def save_checkpoint(self, episode, metrics, checkpoint_type='best_peb'):
+        """Save model checkpoint with detailed metrics"""
+        checkpoint = {
+            'episode': episode,
+            'actor_state_dict': self.agent.actor.state_dict(),
+            'critic_state_dict': self.agent.critic.state_dict(),
+            'actor_optimizer': self.agent.actor_optimizer.state_dict(),
+            'critic_optimizer': self.agent.critic_optimizer.state_dict(),
+            'metrics': metrics
+        }
+        torch.save(checkpoint, f'{checkpoint_type}_model.pth')
+    
+    def plot_training_progress(self):
+        """Plot training metrics"""
+        plt.figure(figsize=(15, 10))
         
-    def train(self, num_episodes=1000, max_steps=200):
-        best_reward = float('-inf')
-        episode_rewards = []
-        self.peb_values = []
-        self.episode_numbers = []
-        peb_history = []
+        # Plot rewards
+        plt.subplot(2, 2, 1)
+        plt.plot(self.metrics['episode_rewards'])
+        plt.title('Episode Rewards')
+        plt.xlabel('Episode')
+        plt.ylabel('Reward')
+        
+        # Plot PEB values
+        plt.subplot(2, 2, 2)
+        plt.plot(self.metrics['peb_values'])
+        plt.title('Position Error Bound (PEB)')
+        plt.xlabel('Episode')
+        plt.ylabel('PEB')
+        plt.yscale('log')
+        
+        # Plot losses
+        plt.subplot(2, 2, 3)
+        plt.plot(self.metrics['actor_losses'], label='Actor')
+        plt.plot(self.metrics['critic_losses'], label='Critic')
+        plt.title('Losses')
+        plt.xlabel('Episode')
+        plt.ylabel('Loss')
+        plt.legend()
+        
+        # Plot learning rates
+        plt.subplot(2, 2, 4)
+        plt.plot(self.metrics['learning_rates'])
+        plt.title('Learning Rate')
+        plt.xlabel('Episode')
+        plt.ylabel('Learning Rate')
+        plt.yscale('log')
+        
+        plt.tight_layout()
+        plt.savefig('training_progress.png')
+        plt.close()
+    
+    def train(self, num_episodes=100000, max_steps=10000, target_peb=12):
         print("Starting training...")
         Nb = self.eng.get_Nb(self.sim)
+        
         for episode in range(num_episodes):
             # Reset environment
-            # state = state.flatten() if len(state.shape) > 1 else state
             matlab_state = self.eng.reset(self.sim)
-            state = np.array(self.eng.reset(self.sim))
-            print(f"Initial state shape: {state.shape}")
+            state = self.process_state(matlab_state)
             episode_reward = 0
+            episode_losses = {'actor': [], 'critic': []}
+            
+            # Initialize episode precoder
             precoder = self.create_simple_precoder(self, Nb)
             
-            current_peb = self.eng.calculatePerformanceMetrics(self.sim, precoder)
-            self.peb_values.append(current_peb)
-            self.episode_numbers.append(episode+1)
+            # Calculate initial PEB
+            rate, current_peb = self.calculate_metrics(precoder, self.sim)
             
             for step in range(max_steps):
-                # Select action using DDPG
-                action = self.agent.select_action(state)
+                # Select action with exploration
+                action = self.agent.select_action(state, explore=True)
                 
-                # Convert numpy array to MATLAB array
+                # Convert and execute action
                 matlab_action = matlab.double(action.tolist())
-                
-                # Step the simulation
                 next_matlab_state, reward, done = self.eng.step(self.sim, matlab_action, nargout=3)
                 
-                # Convert MATLAB outputs to numpy arrays
+                # Process step results
                 next_state = self.process_state(next_matlab_state)
-                reward = float(abs(reward))
+                reward = float(abs(reward))  # Using absolute reward
                 done = bool(done)
                 
-                # Store transition in replay buffer
+                # Store transition and update networks
                 self.agent.replay_buffer.push(state, action, reward, next_state)
+                actor_loss, critic_loss = self.agent.update()
                 
-                # Update the networks
-                self.agent.update()
-                
+                # Track step metrics
                 episode_reward += reward
-                state = next_state
+                if actor_loss is not None:
+                    episode_losses['actor'].append(actor_loss)
+                    episode_losses['critic'].append(critic_loss)
                 
-                # Log training progress
-                if (step + 1) % 10 == 0:
-                    print(f"Episode {episode + 1}, Step {step + 1}, Reward: {reward:.3f}")
+                state = next_state
                 
                 if done:
                     break
             
-            episode_rewards.append(episode_reward)
-            avg_reward = np.mean(episode_rewards[-100:])  # Moving average of last 100 episodes
+            # Update metrics
+            self.metrics['episode_rewards'].append(episode_reward)
+            self.metrics['peb_values'].append(current_peb)
+            if episode_losses['actor']:
+                self.metrics['actor_losses'].append(np.mean(episode_losses['actor']))
+                self.metrics['critic_losses'].append(np.mean(episode_losses['critic']))
+            self.metrics['learning_rates'].append(self.agent.current_actor_lr)
             
-            print(f"Episode {episode + 1}/{num_episodes}")
-            print(f"Total reward: {episode_reward:.3f}")
-            print(f"Average reward (last 100): {avg_reward:.3f}")
-            print("----------------------------------------")
+            # Update best metrics and save checkpoints
+            if episode_reward > self.best_metrics['reward']:
+                self.best_metrics['reward'] = episode_reward
+                self.best_metrics['reward_episode'] = episode
+                self.save_checkpoint(episode, self.metrics, 'best_reward')
             
-            # Save best model
-            if episode_reward > best_reward:
-                best_reward = episode_reward
-                torch.save({
-                    'actor_state_dict': self.agent.actor.state_dict(),
-                    'critic_state_dict': self.agent.critic.state_dict(),
-                    'best_reward': best_reward
-                }, 'best_model.pth')
+            if current_peb < self.best_metrics['peb']:
+                self.best_metrics['peb'] = current_peb
+                self.best_metrics['peb_episode'] = episode
+                self.save_checkpoint(episode, self.metrics, 'best_peb')
+            
+            # Decay learning rates
+            self.agent.decay_learning_rates()
+            
+            # Print progress
+            if episode % 10 == 0:
+                self.plot_training_progress()
+                print(f"\nEpisode {episode + 1}/{num_episodes}")
+                print(f"Reward: {episode_reward:.3f}")
+                print(f"PEB: {current_peb:.6f}")
+                print(f"Best PEB: {self.best_metrics['peb']:.6f}")
+                print(f"Learning Rate: {self.agent.current_actor_lr:.6f}")
+                print(f"Buffer Size: {len(self.agent.replay_buffer)}")
+                print("-" * 50)
+            
+            # Early stopping check
+            if episode > 1000 and np.mean(self.metrics['peb_values'][-1000:]) < target_peb:
+                print(f"Early stopping at episode {episode} - Target PEB achieved")
+                break
         
-        return episode_rewards
+        return self.metrics
     
     def test(self, num_episodes=10):
         """Test the trained agent"""
@@ -144,12 +239,12 @@ class RISISACTrainer:
 
 if __name__ == "__main__":
     # Create trainer instance
-    trainer = RISISACTrainer()
+    trainer = RISISACTrainer(nargout=1)
     
     try:
         # Train the agent
         print("Starting training process...")
-        rewards = trainer.train(num_episodes=300, max_steps=10000)
+        rewards = trainer.train(num_episodes=100000, max_steps=10000, target_peb=12)
         # Test the trained agent
         print("\nTesting trained agent...")
         trainer.test(num_episodes=10)
