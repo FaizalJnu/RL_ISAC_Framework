@@ -2,20 +2,18 @@ import matlab.engine
 import numpy as np
 from ddpg import FLDDPG  # Import our DDPG implementation
 import torch
+import matplotlib.pyplot as plt
 
 class RISISACTrainer:
     def __init__(self):
         # Start MATLAB engine
         print("Starting MATLAB engine...")
-        self.eng = matlab.engine.start_matlab()
-        self.eng.addpath('/Users/faizal/work/RL_ISAC_Framework', nargout=0)  
-        self.eng.savepath(nargout=0)  
+        self.eng = matlab.engine.start_matlab() 
 
         # Initialize MATLAB simulation
-        self.sim = self.eng.RISISAC_V2X_Sim(nargout=1)
+        self.sim = self.eng.RISISAC_V2X_Sim()
         # print(self.eng.methods(self.sim))
         # print(type(self.sim))
-        print(dir(self.sim))
         
         # Get state and action dimensions
         initial_state = self.eng.getState(self.sim)
@@ -55,17 +53,6 @@ class RISISACTrainer:
             'reward_episode': 0,
             'peb_episode': 0
         }
-    
-    # @staticmethod
-    # def calculate_metrics(precoder, sim):
-    #     precoder_matlab = matlab.double(precoder.tolist())
-    #     rate, peb = sim.calculatePerformanceMetrics(precoder_matlab, nargout=2)
-    #     return float(rate), float(peb)
-    
-    def calculate_metrics(self, precoder, sim):  # Add self parameter
-        precoder_matlab = matlab.double(precoder.tolist())
-        rate, peb = sim.calculatePerformanceMetrics(precoder_matlab, nargout=2)
-        return float(rate), float(peb)
 
     @staticmethod
     def create_simple_precoder(self, Nb):
@@ -128,7 +115,7 @@ class RISISACTrainer:
         plt.savefig('training_progress.png')
         plt.close()
     
-    def train(self, num_episodes=100000, max_steps=10000, target_peb=12):
+    def train(self, num_episodes, max_steps, target_peb):
         print("Starting training...")
         Nb = self.eng.get_Nb(self.sim)
         
@@ -143,7 +130,7 @@ class RISISACTrainer:
             precoder = self.create_simple_precoder(self, Nb)
             
             # Calculate initial PEB
-            rate, current_peb = self.calculate_metrics(precoder, self.sim)
+            current_peb = self.eng.calculatePerformanceMetrics(self.sim, precoder)
             
             for step in range(max_steps):
                 # Select action with exploration
@@ -187,7 +174,7 @@ class RISISACTrainer:
                 self.best_metrics['reward_episode'] = episode
                 self.save_checkpoint(episode, self.metrics, 'best_reward')
             
-            if current_peb < self.best_metrics['peb']:
+            if abs(current_peb) < abs(self.best_metrics['peb']):
                 self.best_metrics['peb'] = current_peb
                 self.best_metrics['peb_episode'] = episode
                 self.save_checkpoint(episode, self.metrics, 'best_peb')
@@ -239,20 +226,26 @@ class RISISACTrainer:
 
 if __name__ == "__main__":
     # Create trainer instance
-    trainer = RISISACTrainer(nargout=1)
+    trainer = RISISACTrainer()
+    print(type(trainer.sim))
     
     try:
         # Train the agent
         print("Starting training process...")
-        rewards = trainer.train(num_episodes=100000, max_steps=10000, target_peb=12)
+        # rewards = trainer.train(num_episodes=100000, max_steps=10000, target_peb=12)
+        metrics = trainer.train(num_episodes=300, max_steps=10000, target_peb=12)
+
+        # Extract episode rewards
+        rewards = metrics['episode_rewards']
+        episodes = list(range(len(rewards)))
+
         # Test the trained agent
         print("\nTesting trained agent...")
         trainer.test(num_episodes=10)
         
         # Plot training rewards
-        import matplotlib.pyplot as plt
         plt.figure(figsize=(10, 5))
-        plt.plot(rewards)
+        plt.plot(episodes, rewards)
         plt.title('Training Rewards')
         plt.xlabel('Episode')
         plt.ylabel('Reward')
@@ -260,7 +253,7 @@ if __name__ == "__main__":
         plt.show()
         
         plt.figure(figsize=(10, 5))
-        plt.plot(trainer.episode_numbers, trainer.peb_values)
+        plt.plot(episodes, metrics['peb_values'])
         plt.title('Performance Error Bound (PEB) over Episodes')
         plt.xlabel('Episode')
         plt.ylabel('PEB Value')

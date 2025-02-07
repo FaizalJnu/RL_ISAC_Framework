@@ -257,34 +257,6 @@ classdef RISISAC_V2X_Sim < handle
 
             peb = sqrt(trace(CRLB(1:2, 1:2))); % Focus on x-y positioning
 
-            % try
-            %     [J, Jzao, T] = computeFisherInformationMatrix(obj, precoder, H_eff);
-                
-            %     % Position Error Bound calculation
-            %     CRLB = inv(J);
-
-            %     peb = sqrt(trace(CRLB(1:2, 1:2))); % Focus on x-y positioning
-            % catch
-            %     % Fallback to previous simple FIM calculation
-            %     % Ensure F is the same size as H_eff * (precoder * precoder') * H_eff'
-            %     F = zeros(size(H_eff * (precoder * precoder') * H_eff'));
-                
-            %     for k = 1:obj.Ns
-            %         H_k = H_eff; % Consider frequency-dependent channel
-            %         J_k = H_k * (precoder * precoder') * H_k';
-                    
-            %         % Ensure J_k matches the size of F before addition
-            %         if size(J_k) ~= size(F)
-            %             warning('Size mismatch in Fisher Information Matrix calculation');
-            %             J_k = zeros(size(F)); % Fallback to zero matrix if sizes don't match
-            %         end
-                    
-            %         F = F + real(J_k);
-            %     end
-                
-            %     peb = sqrt(trace(inv(F)));
-            % end
-            
             % Additional performance metrics
             additionalMetrics = struct(...
                 'Distances', struct(...
