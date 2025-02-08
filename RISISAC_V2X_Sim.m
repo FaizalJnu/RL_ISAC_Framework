@@ -7,6 +7,7 @@ classdef RISISAC_V2X_Sim < handle
         Nb = 4                    % Number of BS antennas
         Nt = 4                    % Number of target antennas
         Nr = 64                   % Number of RIS elements
+        Mb = 2
         
         % Path loss parameters
         alpha_l = 3.2             % Direct path loss exponent
@@ -528,13 +529,26 @@ classdef RISISAC_V2X_Sim < handle
                     error('Invalid angle type');
             end
         end
+
+        function [Wx] = computeWx(obj)
+            Nb = obj.Nb; % Number of base stations
+            Mb = obj.Mb; % Number of beams
+            W = rand(Nb, Mb) + 1j*randn(Nb, Mb); 
+            W = W ./ vecnorm(W); %Normalized vector presentation
+            
+            x = randn(Mb, 1) + 1j*randn(Mb, 1); 
+            Wx = W*x;
+        end
         
         function [J, Jzao, T] = computeFisherInformationMatrix(obj, precoder, H_eff)
-            % Parameters
-            Pb = 1;  % Transmit power (placeholder)
-            sigma_s = 1;  % Noise variance (placeholder)
+
+            Wx = computeWx(obj);
+            Pb =  norm(Wx)^2; 
             B = obj.B;  % Bandwidth
-            N = obj.Ns;  % Number of subcarriers
+            N = obj.Ns;
+            SNR = 20;  % 20 Decibels 
+            
+            sigma_s = sqrt(SNR/Pb);  % Noise variance (placeholder)
             lambda = 3e8 / obj.fc;  % Wavelength
             
             % Compute geometric parameters
@@ -566,7 +580,7 @@ classdef RISISAC_V2X_Sim < handle
             mapping_matrix(1:min(7, J_k_rows), 1:min(7, J_k_cols)) = 1;
             
             % Compute Jzao using subcarrier-based approach
-            for n = 1:N
+            for n = 1:N % here N is the the number of subcarriers
                 % Effective channel for this subcarrier
                 H_k = H_eff;  % In practice, this might vary with frequency
                 
@@ -577,7 +591,7 @@ classdef RISISAC_V2X_Sim < handle
                 for i = 1:7
                     for j = 1:7
                         if i <= size(J_k, 1) && j <= size(J_k, 2)
-                            Jzao(i,j) = Jzao(i,j) + 2*Pb/sigma_s * real(J_k(i,j));
+                            Jzao(i,j) = Jzao(i,j) + 2*Pb/(sigma_s*sigma_s) * real(J_k(i,j));
                         else
                             % For indices beyond J_k dimensions, add zero contribution
                             Jzao(i,j) = Jzao(i,j) + 0;

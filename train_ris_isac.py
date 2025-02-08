@@ -180,8 +180,9 @@ class RISISACTrainer:
                 self.save_checkpoint(episode, self.metrics, 'best_peb')
             
             # Decay learning rates
-            self.agent.decay_learning_rates()
+            decay_rate = self.agent.decay_learning_rates()
             
+
             # Print progress
             if episode % 10 == 0:
                 self.plot_training_progress()
@@ -191,6 +192,7 @@ class RISISACTrainer:
                 print(f"Best PEB: {self.best_metrics['peb']:.6f}")
                 print(f"Learning Rate: {self.agent.current_actor_lr:.6f}")
                 print(f"Buffer Size: {len(self.agent.replay_buffer)}")
+                print(f"Decay rate is: {decay_rate}")
                 print("-" * 50)
             
             # Early stopping check
