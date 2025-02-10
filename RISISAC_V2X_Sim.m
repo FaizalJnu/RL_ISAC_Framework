@@ -8,6 +8,9 @@ classdef RISISAC_V2X_Sim < handle
         Nt = 4                    % Number of target antennas
         Nr = 64                   % Number of RIS elements
         Mb = 2
+
+        speed = 10
+        end_x = 1000
         
         % Path loss parameters
         alpha_l = 3.2             % Direct path loss exponent
@@ -56,6 +59,7 @@ classdef RISISAC_V2X_Sim < handle
         function nb = get_Nb(obj)
             nb = obj.Nb;
         end
+
         
         function initializeChannels(obj)
             % Initialize direct channel
@@ -172,29 +176,26 @@ classdef RISISAC_V2X_Sim < handle
         end
         
         function [next_state, reward, done] = step(obj, action)
-            % Parse action vector
-            ris_phases = action(1:obj.Nr);           % RIS phase shifts
-            throttle = action(obj.Nr + 1);           % Vehicle throttle
-            steering = action(obj.Nr + 2);           % Steering angle
+            % Parse action vector - only for RIS phase shifts
+            % Assuming action is a vector of phase shifts for each RIS element
+            ris_phases = action(1:obj.Nr); 
             
-            % Update RIS phase shifts
+            % Update RIS phase shifts (normalized between 0 and 2π)
             obj.Phi = diag(exp(1j * 2 * pi * ris_phases));
             
-            % Update vehicle state
-            obj.updateVehicleDynamics(throttle, steering);
-            
-            % Calculate performance metrics
+            % Calculate performance metrics considering fixed positions
             precoder = eye(obj.Nb) / sqrt(obj.Nb);  % Simple precoder
-
             [rate, peb] = obj.calculatePerformanceMetrics(precoder);
-            % Calculate reward
+            
+            % Calculate reward based on communication performance
             R_min = computeR_min(obj);
             reward = obj.computeReward(peb, rate, R_min);
             
             % Get next state
             next_state = obj.getState();
             
-            % Check if episode is done
+            % Check if episode is done (based on maximum steps or achieved performance)
+            % You might want to modify this condition based on your requirements
             done = obj.isEpisodeDone();
         end
 
@@ -266,48 +267,6 @@ classdef RISISAC_V2X_Sim < handle
             angles.ris_to_target.azimuth = acos((yr - yt) / L_proj2);
             angles.ris_to_target.elevation_angle = acos(zr / L2);
         end
-        
-        % function [rate, peb, additionalMetrics] = calculatePerformanceMetrics(obj, precoder)
-        %     % Compute geometric parameters
-        %     [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj);
-            
-        %     % Calculate effective channel
-        %     H_eff = obj.H_d + obj.H_rt * obj.Phi * obj.H_br;
-            
-        %     % SNR calculation
-        %     SNR = 20; % dB
-        %     gamma = 10^(SNR/10);
-            
-        %     % Rate calculation (closer to the problem formulation)
-        %     rate = log2(1 + gamma * det(eye(obj.Nt) + H_eff * (precoder * precoder') * H_eff') / trace(H_eff * (precoder * precoder') * H_eff'));
-            
-        %     % Compute Transformation Matrix and Fisher Information Matrix
-        %     [T, dParams] = computeTransformationMatrix(obj);
-            
-        %     % Detailed Fisher Information Matrix computation
-        %     [J, Jzao, T] = computeFisherInformationMatrix(obj, precoder, H_eff);
-                
-        %     % Position Error Bound calculation
-        %     CRLB = inv(J);
-
-        %     peb = sqrt(trace(CRLB(1:2, 1:2))); % Focus on x-y positioning
-
-        %     % Additional performance metrics
-        %     additionalMetrics = struct(...
-        %         'Distances', struct(...
-        %             'L1', L1, ...
-        %             'L2', L2, ...
-        %             'L3', L3, ...
-        %             'L_proj1', L_proj1, ...
-        %             'L_proj2', L_proj2, ...
-        %             'L_proj3', L_proj3 ...
-        %         ), ...
-        %         'Delays', delays, ...
-        %         'Angles', angles, ...
-        %         'SNR', SNR, ...
-        %         'Gamma', gamma ...
-        %     );
-        % end
 
         function [peb, rate, additionalMetrics] = calculatePerformanceMetrics(obj, precoder)
             % Compute geometric parameters
@@ -625,6 +584,53 @@ classdef RISISAC_V2X_Sim < handle
                     error('Invalid angle type');
             end
         end
+
+        function abr = computeTransmitterResponseVector(obj, psi_br)
+            % Calculate transmitter antenna response vector
+            % psi_br: transmission angle
+            N = obj.Nb; % Number of antenna elements (adjust as needed)
+            d = 0.5; % Normalized antenna spacing
+            k = 2 * pi; % Wave number
+            
+            array_positions = (0:N-1)' * d;
+            abr = exp(1j * k * array_positions * sin(psi_br));
+            abr = abr / sqrt(N); % Normalization
+        end
+
+        function abr = computeReceiverResponseVector(obj, phi_a, phi_e)
+            % Calculate receiver antenna response vector
+            % phi_a: azimuth AOA
+            % phi_e: elevation AOA
+            Nx = 8; % Number of elements in x-direction
+            Ny = 8; % Number of elements in y-direction
+            dx = 0.5; % Normalized spacing in x
+            dy = 0.5; % Normalized spacing in y
+            k = 2 * pi; % Wave number
+            
+            % Create 2D array positions
+            x_pos = (0:Nx-1)' * dx;
+            y_pos = (0:Ny-1)' * dy;
+            
+            % Calculate steering vectors
+            ax = exp(1j * k * x_pos * sin(phi_a) * cos(phi_e));
+            ay = exp(1j * k * y_pos * sin(phi_e));
+            
+            % Kronecker product for 2D array
+            abr = kron(ax, ay);
+            abr = abr / sqrt(Nx * Ny); % Normalization
+        end
+
+        function [phi_a, phi_e] = computeArrivalAngles(obj, source_loc, target_loc)
+            % Calculate azimuth and elevation angles
+            delta = target_loc - source_loc;
+            
+            % Azimuth angle
+            phi_a = atan2(delta(2), delta(1));
+            
+            % Elevation angle
+            r_xy = sqrt(delta(1)^2 + delta(2)^2);
+            phi_e = atan2(delta(3), r_xy);
+        end
         
         function angle_diff = computeAngleDifference(obj, ref_loc, target_loc, angleType)
             % Ensure inputs are column vectors
@@ -732,15 +738,6 @@ classdef RISISAC_V2X_Sim < handle
             % Compute transformation matrix T
             [T, dParams] = computeTransformationMatrix(obj);
             
-            % Calculate dimensions of J_k before the loop
-            H_k = H_eff;  % In practice, this might vary with frequency
-            J_k_temp = H_k * (precoder * precoder') * H_k';
-            [J_k_rows, J_k_cols] = size(J_k_temp);
-            
-            % Create a mapping matrix to handle dimension mismatch
-            mapping_matrix = zeros(7, max(J_k_rows, J_k_cols));
-            mapping_matrix(1:min(7, J_k_rows), 1:min(7, J_k_cols)) = 1;
-            
             % Compute Jzao using subcarrier-based approach
             for n = 1:N % here N is the the number of subcarriers
                 % Effective channel for this subcarrier
@@ -774,26 +771,6 @@ classdef RISISAC_V2X_Sim < handle
             psibt = acos(zb / L3);
             psitb = asin(zb / L3);
         end
-        
-        % function reward = calculateReward(obj, rate, peb)
-        %     % Calculate reward based on rate, PEB, and vehicle state
-        %     w1 = 0.6;  % Weight for rate
-        %     w2 = 0.3;  % Weight for PEB
-        %     w3 = 0.1;  % Weight for vehicle dynamics
-            
-        %     % Normalize metrics
-        %     norm_rate = rate / 10;  % Assuming max rate is 10 bps/Hz
-        %     norm_peb = min(1, peb / 10);  % Assuming max PEB is 10m
-            
-        %     % Calculate vehicle dynamics component
-        %     speed = norm(obj.vehicle.velocity(1:2));
-        %     speed_reward = speed / obj.vehicle.max_speed;  % Reward for maintaining good speed
-            
-        %     reward = w1 * norm_rate - w2 * norm_peb + w3 * speed_reward;
-        %     if abs(reward) > 1.8
-        %         reward = 1.8;
-        %     end
-        % end
         
         function done = isEpisodeDone(obj)
             % Check if vehicle is out of bounds
