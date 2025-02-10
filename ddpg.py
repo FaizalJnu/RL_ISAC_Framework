@@ -20,8 +20,6 @@ class ActorNetwork(nn.Module):
         super(ActorNetwork, self).__init__()
         
         self.epsilon = epsilon
-        
-        # Build the network layers
         layers = []
         prev_dim = state_dim
         
@@ -30,11 +28,10 @@ class ActorNetwork(nn.Module):
             layers.extend([
                 nn.Linear(prev_dim, hidden_dim),
                 nn.ReLU(),
-                nn.LayerNorm(hidden_dim)  # Layer normalization for better stability
+                nn.LayerNorm(hidden_dim) 
             ])
             prev_dim = hidden_dim
         
-        # Output layer with tanh activation to bound actions
         layers.append(nn.Linear(prev_dim, action_dim))
         layers.append(nn.Tanh())
         
@@ -445,12 +442,12 @@ class FLDDPG:
                 
                 # Update networks and get losses
                 actor_loss, critic_loss = self.update()
-                if actor_loss != 0:  # Only append if update occurred
+                if actor_loss != 0:
                     episode_actor_losses.append(actor_loss)
                     episode_critic_losses.append(critic_loss)
                 
                 episode_reward += reward
-                episode_peb = info.get('peb', 0)  # Assuming PEB is in info
+                episode_peb = info.get('peb', 0) 
                 state = next_state
                 
                 if done:
@@ -501,10 +498,5 @@ class FLDDPG:
                 print(f"Epsilon: {self.epsilon:.3f}")
                 print(f"Learning Rate: {self.current_actor_lr:.6f}")
                 print("-" * 50)
-            
-            # Optional: Early stopping
-            # if episode > 1000 and np.mean(peb_history[-1000:]) < target_peb:
-            #     print(f"Early stopping at episode {episode} - Target PEB achieved")
-            #     break
         
         return rewards_history, peb_history, actor_losses, critic_losses

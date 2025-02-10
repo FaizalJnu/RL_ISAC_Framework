@@ -187,9 +187,9 @@ classdef RISISAC_V2X_Sim < handle
             precoder = eye(obj.Nb) / sqrt(obj.Nb);  % Simple precoder
 
             [rate, peb] = obj.calculatePerformanceMetrics(precoder);
-            
             % Calculate reward
-            reward = obj.calculateReward(rate, peb);
+            R_min = computeR_min(obj);
+            reward = obj.computeReward(peb, rate, R_min);
             
             % Get next state
             next_state = obj.getState();
@@ -197,6 +197,40 @@ classdef RISISAC_V2X_Sim < handle
             % Check if episode is done
             done = obj.isEpisodeDone();
         end
+
+        function reward = computeReward(obj, peb, rate, R_min)
+            % Compute reward based on (1/PEB) with constraint penalty
+            % Parameters
+            Q = 0.5; % Reward factor for unsatisfied constraints (ρ in your notation)
+                        % You can adjust this value between 0 and 1
+            
+            % Check if constraints are satisfied
+            constraints_satisfied = (rate >= R_min);
+            
+            % Calculate base reward as 1/PEB
+            base_reward = 1/peb;
+            
+            if ~constraints_satisfied
+                % Apply penalty factor Q when constraints are not satisfied
+                reward = base_reward * Q;
+            else
+                % Full reward when constraints are satisfied
+                reward = base_reward;
+            end
+        end
+
+        function [R_min] = computeR_min(obj)
+            B = obj.B;
+            SNR = 20;   % SNR in dB
+            gamma = 10^(SNR/10);  % Linear SNR
+
+            % Shannon capacity formula for baseline
+            R_theoretical = B * log2(1 + gamma);
+
+            % Set R_min as a fraction of theoretical maximum
+            R_min = 0.5 * R_theoretical;
+        end
+
 
         function [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj)
             % Extract coordinates
@@ -233,7 +267,49 @@ classdef RISISAC_V2X_Sim < handle
             angles.ris_to_target.elevation_angle = acos(zr / L2);
         end
         
-        function [rate, peb, additionalMetrics] = calculatePerformanceMetrics(obj, precoder)
+        % function [rate, peb, additionalMetrics] = calculatePerformanceMetrics(obj, precoder)
+        %     % Compute geometric parameters
+        %     [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj);
+            
+        %     % Calculate effective channel
+        %     H_eff = obj.H_d + obj.H_rt * obj.Phi * obj.H_br;
+            
+        %     % SNR calculation
+        %     SNR = 20; % dB
+        %     gamma = 10^(SNR/10);
+            
+        %     % Rate calculation (closer to the problem formulation)
+        %     rate = log2(1 + gamma * det(eye(obj.Nt) + H_eff * (precoder * precoder') * H_eff') / trace(H_eff * (precoder * precoder') * H_eff'));
+            
+        %     % Compute Transformation Matrix and Fisher Information Matrix
+        %     [T, dParams] = computeTransformationMatrix(obj);
+            
+        %     % Detailed Fisher Information Matrix computation
+        %     [J, Jzao, T] = computeFisherInformationMatrix(obj, precoder, H_eff);
+                
+        %     % Position Error Bound calculation
+        %     CRLB = inv(J);
+
+        %     peb = sqrt(trace(CRLB(1:2, 1:2))); % Focus on x-y positioning
+
+        %     % Additional performance metrics
+        %     additionalMetrics = struct(...
+        %         'Distances', struct(...
+        %             'L1', L1, ...
+        %             'L2', L2, ...
+        %             'L3', L3, ...
+        %             'L_proj1', L_proj1, ...
+        %             'L_proj2', L_proj2, ...
+        %             'L_proj3', L_proj3 ...
+        %         ), ...
+        %         'Delays', delays, ...
+        %         'Angles', angles, ...
+        %         'SNR', SNR, ...
+        %         'Gamma', gamma ...
+        %     );
+        % end
+
+        function [peb, rate, additionalMetrics] = calculatePerformanceMetrics(obj, precoder)
             % Compute geometric parameters
             [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj);
             
@@ -244,21 +320,53 @@ classdef RISISAC_V2X_Sim < handle
             SNR = 20; % dB
             gamma = 10^(SNR/10);
             
-            % Rate calculation (closer to the problem formulation)
-            rate = log2(1 + gamma * det(eye(obj.Nt) + H_eff * (precoder * precoder') * H_eff') / trace(H_eff * (precoder * precoder') * H_eff'));
+            % Calculate communication rate
+            B = obj.B; % Bandwidth
+            rate = B * log2(1 + gamma * det(eye(obj.Nt) + H_eff * (precoder * precoder') * H_eff') / ...
+                   trace(H_eff * (precoder * precoder') * H_eff'));
             
-            % Compute Transformation Matrix and Fisher Information Matrix
-            [T, dParams] = computeTransformationMatrix(obj);
+            % Check if rate constraint is satisfied
+            R_min = computeR_min(obj); % Minimum required rate
+            rate_constraint_satisfied = (rate >= R_min);
+
+            % Compute FIM and CRLB
+            [J, ~, ~] = computeFisherInformationMatrix(obj, precoder, H_eff);
+
+            % Minimize PEB by optimizing the inverse of FIM (CRLB)
+            % First, ensure J is well-conditioned
+            epsilon = 1e-10;  % Small constant for numerical stability
+            J = J + epsilon * eye(size(J));
+
+            % Compute eigenvalue decomposition of J
+            [V, D] = eig(J);
+            eigenvalues = diag(D);
+
+            % Improve conditioning by adjusting smallest eigenvalues
+            min_eigenvalue = max(eigenvalues) * 1e-12;
+            eigenvalues(eigenvalues < min_eigenvalue) = min_eigenvalue;
+
+            % Reconstruct improved J
+            J_improved = V * diag(eigenvalues) * V';
+
+            % Compute optimized CRLB
+            CRLB = inv(J_improved);
+
+            % Extract position-related components (assuming first 2x2 block is position)
+            pos_CRLB = CRLB(1:2, 1:2);
+
+            % Optional: Apply weighting to prioritize certain dimensions
+            weights = [1, 1];  % Equal weights for x and y
+            weighted_pos_CRLB = diag(weights) * pos_CRLB * diag(weights);
+
+            % Calculate final PEB
+            peb = sqrt(trace(weighted_pos_CRLB));
+
+            % Optionally scale PEB based on rate constraint satisfaction
+            if ~rate_constraint_satisfied
+                peb = peb * (1 + (R_min - rate)/R_min);  % Penalty for rate constraint violation
+            end
             
-            % Detailed Fisher Information Matrix computation
-            [J, Jzao, T] = computeFisherInformationMatrix(obj, precoder, H_eff);
-                
-            % Position Error Bound calculation
-            CRLB = inv(J);
-
-            peb = sqrt(trace(CRLB(1:2, 1:2))); % Focus on x-y positioning
-
-            % Additional performance metrics
+            % Store additional metrics
             additionalMetrics = struct(...
                 'Distances', struct(...
                     'L1', L1, ...
@@ -271,9 +379,44 @@ classdef RISISAC_V2X_Sim < handle
                 'Delays', delays, ...
                 'Angles', angles, ...
                 'SNR', SNR, ...
-                'Gamma', gamma ...
+                'Gamma', gamma, ...
+                'RateConstraintSatisfied', rate_constraint_satisfied ...
             );
         end
+        
+        % function [optTheta] = optimizeRISPhase(obj, current_theta)
+        %     % Optimize RIS phase shifts
+        %     Nr = obj.Nr; % Number of RIS elements
+            
+        %     % Define optimization variables
+        %     theta = sdpvar(Nr, 1);
+            
+        %     % Objective: Minimize PEB while considering rate constraints
+        %     objective = comp
+            
+        %     % Constraints
+        %     constraints = [];
+            
+        %     % Phase shift constraints
+        %     for i = 1:Nr
+        %         constraints = [constraints; -pi <= theta(i) <= pi];
+        %     end
+            
+        %     % Communication rate constraint
+        %     rate = computeRate(obj, theta);
+        %     R_min = computeR_min(obj);
+        %     constraints = [constraints; rate >= R_min];
+            
+        %     % Solve optimization
+        %     options = sdpsettings('solver', 'mosek', 'verbose', 0);
+        %     sol = optimize(constraints, objective, options);
+            
+        %     if sol.problem == 0
+        %         optTheta = value(theta);
+        %     else
+        %         optTheta = current_theta;
+        %     end
+        % end
         
         function [T, dParams] = computeTransformationMatrix(obj)
             % Compute initial geometric parameters
@@ -413,17 +556,15 @@ classdef RISISAC_V2X_Sim < handle
             end
         end
         
-        function [dx, dy] = computeAngleDerivatives(obj, angleType)
+        function [dx, dy, abr] = computeAngleDerivatives(obj, angleType)
             % Numerical differentiation of angles
-            epsilon = 1e-8;  % Small perturbation
-            
+            epsilon = 1e-8; % Small perturbation
             % Original location
             orig_loc = obj.target_loc;
             
             % Compute derivatives using central difference method
             dx_perturb_pos = orig_loc;
             dx_perturb_pos(1) = orig_loc(1) + epsilon;
-            
             dy_perturb_pos = orig_loc;
             dy_perturb_pos(2) = orig_loc(2) + epsilon;
             
@@ -432,9 +573,29 @@ classdef RISISAC_V2X_Sim < handle
                 case 'ris_to_target_aoa'
                     % Angle of Arrival at RIS-target link
                     dx = (obj.computeAngleDifference(obj.ris_loc, dx_perturb_pos, 'aoa') - ...
-                          obj.computeAngleDifference(obj.ris_loc, orig_loc, 'aoa')) / epsilon;
+                        obj.computeAngleDifference(obj.ris_loc, orig_loc, 'aoa')) / epsilon;
                     dy = (obj.computeAngleDifference(obj.ris_loc, dy_perturb_pos, 'aoa') - ...
-                          obj.computeAngleDifference(obj.ris_loc, orig_loc, 'aoa')) / epsilon;
+                        obj.computeAngleDifference(obj.ris_loc, orig_loc, 'aoa')) / epsilon;
+                    
+                case 'bs_to_ris_response'
+                    % Calculate transmitter antenna response vector (abr)
+                    psi_br = obj.computeTransmissionAngle(obj.bs_loc, obj.ris_loc);
+                    abr = obj.computeTransmitterResponseVector(psi_br);
+                    
+                    dx = (obj.computeAngleDifference(obj.bs_loc, dx_perturb_pos, 'transmit') - ...
+                        obj.computeAngleDifference(obj.bs_loc, orig_loc, 'transmit')) / epsilon;
+                    dy = (obj.computeAngleDifference(obj.bs_loc, dy_perturb_pos, 'transmit') - ...
+                        obj.computeAngleDifference(obj.bs_loc, orig_loc, 'transmit')) / epsilon;
+                    
+                case 'ris_receiver_response'
+                    % Calculate receiver antenna response vector
+                    [phi_a, phi_e] = obj.computeArrivalAngles(obj.ris_loc, orig_loc);
+                    abr = obj.computeReceiverResponseVector(phi_a, phi_e);
+                    
+                    dx = (obj.computeAngleDifference(obj.ris_loc, dx_perturb_pos, 'receive') - ...
+                        obj.computeAngleDifference(obj.ris_loc, orig_loc, 'receive')) / epsilon;
+                    dy = (obj.computeAngleDifference(obj.ris_loc, dy_perturb_pos, 'receive') - ...
+                        obj.computeAngleDifference(obj.ris_loc, orig_loc, 'receive')) / epsilon;
                 
                 case 'ris_to_target_azimuth'
                     dx = (obj.computeAngleDifference(obj.ris_loc, dx_perturb_pos, 'azimuth') - ...
@@ -529,7 +690,8 @@ classdef RISISAC_V2X_Sim < handle
                     error('Invalid angle type');
             end
         end
-
+        
+        % transmit signal vector from beamforming matrix calculation
         function [Wx] = computeWx(obj)
             Nb = obj.Nb; % Number of base stations
             Mb = obj.Mb; % Number of beams
@@ -613,22 +775,25 @@ classdef RISISAC_V2X_Sim < handle
             psitb = asin(zb / L3);
         end
         
-        function reward = calculateReward(obj, rate, peb)
-            % Calculate reward based on rate, PEB, and vehicle state
-            w1 = 0.6;  % Weight for rate
-            w2 = 0.3;  % Weight for PEB
-            w3 = 0.1;  % Weight for vehicle dynamics
+        % function reward = calculateReward(obj, rate, peb)
+        %     % Calculate reward based on rate, PEB, and vehicle state
+        %     w1 = 0.6;  % Weight for rate
+        %     w2 = 0.3;  % Weight for PEB
+        %     w3 = 0.1;  % Weight for vehicle dynamics
             
-            % Normalize metrics
-            norm_rate = rate / 10;  % Assuming max rate is 10 bps/Hz
-            norm_peb = min(1, peb / 10);  % Assuming max PEB is 10m
+        %     % Normalize metrics
+        %     norm_rate = rate / 10;  % Assuming max rate is 10 bps/Hz
+        %     norm_peb = min(1, peb / 10);  % Assuming max PEB is 10m
             
-            % Calculate vehicle dynamics component
-            speed = norm(obj.vehicle.velocity(1:2));
-            speed_reward = speed / obj.vehicle.max_speed;  % Reward for maintaining good speed
+        %     % Calculate vehicle dynamics component
+        %     speed = norm(obj.vehicle.velocity(1:2));
+        %     speed_reward = speed / obj.vehicle.max_speed;  % Reward for maintaining good speed
             
-            reward = w1 * norm_rate - w2 * norm_peb + w3 * speed_reward;
-        end
+        %     reward = w1 * norm_rate - w2 * norm_peb + w3 * speed_reward;
+        %     if abs(reward) > 1.8
+        %         reward = 1.8;
+        %     end
+        % end
         
         function done = isEpisodeDone(obj)
             % Check if vehicle is out of bounds
@@ -656,4 +821,3 @@ classdef RISISAC_V2X_Sim < handle
     end
     
 end
-

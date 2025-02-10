@@ -235,7 +235,7 @@ if __name__ == "__main__":
         # Train the agent
         print("Starting training process...")
         # rewards = trainer.train(num_episodes=100000, max_steps=10000, target_peb=12)
-        metrics = trainer.train(num_episodes=300, max_steps=10000, target_peb=12)
+        metrics = trainer.train(num_episodes=300, max_steps=10000, target_peb=0)
 
         # Extract episode rewards
         rewards = metrics['episode_rewards']
