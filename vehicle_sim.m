@@ -141,6 +141,7 @@ end
 
 % Function to generate direct channel (Nt x Nb)
 function H_bt = generate_H_bt(Nt, Nr)
+    lambda = 3e8/2e7
     d = lambda / 2;
     [~,~,~,~,~,~,~,~, angles] = computeGeometricParameters();
     psi_bt = angles.bs_to_target.aoa_in;
