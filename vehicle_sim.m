@@ -5,7 +5,7 @@ Nx = 8;         % Number of RIS elements in x-direction
 Ny = 8;         % Number of RIS elements in y-direction
 Nr = Nx * Ny;   % Total number of RIS elements
 Mb = 10;        % Number of OFDM subcarriers
-B = 20;         
+B = 20e6;         % MHz
 lambda = 3e8/2e7;   % Wavelength (assuming frequency around 3GHz)
 d = lambda/2;   % Inter-element spacing
 
@@ -117,7 +117,7 @@ function [received_signal, direct_channel, cascaded_channel] = simulate_downlink
     % Cascaded channel components
     % H_br (RIS to BS): Nr x Nb
     % H_rv (Vehicle to RIS): Nt x Nr
-    [H_br, H_rt] = generate_H_br_H_rt(bs_loc, ris_loc, vehicle_pos, Nb, Nr, Nt);
+    [H_br, H_rt] = generate_H_br_H_rt(Nb, Nr, Nt);
     
     % RIS phase shifts (diagonal matrix Nr x Nr)
     Phi = diag(exp(1i*2*pi*rand(Nr,1)));
@@ -139,33 +139,135 @@ function [received_signal, direct_channel, cascaded_channel] = simulate_downlink
     end
 end
 
+function gammma_c = generate_gamma_c()
+end
+
 % Function to generate direct channel (Nt x Nb)
 function H_bt = generate_H_bt(Nt, Nr)
-    lambda = 3e8/2e7
+    lambda = 3e8/2e7;
     d = lambda / 2;
-    [~,~,~,~,~,~,~,~, angles] = computeGeometricParameters();
+    [~,~,~,~,~,~,~, angles] = computeGeometricParameters();
     psi_bt = angles.bs_to_target.aoa_in;
     psi_tb = angles.bs_to_target.aoa_out;
     a_psi_bt = generate_a_psi_bt(Nt, psi_bt, lambda, d);
-    a_psi_tb = generate_a_psi_tb(Nt, psi_bt, lambda, d);
+    a_psi_tb = generate_a_psi_tb(Nt, psi_tb, lambda, d);
     H_bt = a_psi_tb*a_psi_bt';
 end
+
+function a_psi_bt = generate_a_psi_bt(Nant, psi_bt, lambda, d)
+    k = 2*pi/lambda;  % Wave number
+    n = 0:(Nant-1);
+    
+    % Steering vector computation
+    phase_terms = exp(1j * k * d * n * sin(psi_bt));
+    
+    % Normalize by sqrt(Nant)
+    a_psi_bt = phase_terms / sqrt(Nant);
+    
+    % Ensure column vector
+    a_psi_bt = a_psi_bt(:);
+end
+
+function a_psi_tb = generate_a_psi_tb(Nant, psi_tb, lambda, d)
+    k = 2*pi/lambda;  % Wave number
+    n = 0:(Nant-1);
+    
+    % Steering vector computation
+    phase_terms = exp(1j * k * d * n * sin(psi_tb));
+    
+    % Normalize by sqrt(Nant)
+    a_psi_tb = phase_terms / sqrt(Nant);
+    
+    % Ensure column vector
+    a_psi_tb = a_psi_tb(:); 
+end
+
+
+function H_Los = generate_H_Los(H_bt, Nt, Nb, Nr)
+    % Parameters
+    K_dB = 4;                  % Rician K-factor in dB
+    K = 10^(K_dB/10);
+    sigma = sqrt(1/(2*(K+1)));
+    mu = sqrt(K/(K+1));
+    
+    % Generate small-scale fading
+    hl = (sigma * complex(randn(1,1), randn(1,1))) + mu;
+    
+    % Path loss in linear scale (110 dB)
+    rho_l = 10^(110/10);
+    
+    % Calculate gamma_l
+    gamma_l = sqrt(Nb*Nt)/sqrt(rho_l);
+    
+    % System parameters
+    B = 20e6;          % Bandwidth (20 MHz)
+    N = 2048;          % FFT size
+    [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters();
+    tau_l = delays.line_of_sight;      % Delay (1 microsecond - typical for urban V2X)
+    
+    % Generate H_Los for all subcarriers
+    H_Los = zeros(Nr, Nt, N);
+    for n = 0:N-1
+        phase = exp(1j*2*pi*B*n*tau_l/N);
+        H_Los(:,:,n) = gamma_l * hl * H_bt * phase;
+    end
+end
+
+function H_NLoS = generate_H_NLoS(H_rt, H_br, Nt, Nb, Nr)
+    % Parameters
+    K_dB = 4;                  % Rician K-factor in dB
+    K = 10^(K_dB/10);
+    sigma = sqrt(1/(2*(K+1)));
+    mu = sqrt(K/(K+1));
+    
+    % Generate small-scale fading
+    hnl = (sigma * complex(randn(1,1), randn(1,1))) + mu;
+    
+    % Path loss in linear scale (typically higher than LoS due to indirect path)
+    rho_nl = 10^(120/10);      % Using 120 dB for NLoS
+    
+    % Calculate gamma_nl
+    gamma_nl = sqrt(Nb*Nr)/sqrt(rho_nl);
+    
+    % System parameters
+    B = 20e6;          % Bandwidth (20 MHz)
+    N = 2048;          % FFT size
+    [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters();
+    tau_nl = delays.non_line_of_sight;     % Delay (2 microseconds - longer due to indirect path)
+    
+    % Generate RIS reflection parameters (u)
+    rho_r = 1;         % Reflection coefficient magnitude (typically close to 1)
+    theta = 2*pi*rand(Nr,1);  % Random phase shifts between 0 and 2π
+    u = rho_r * exp(1j*theta);
+    
+    % Create diagonal matrix Phi
+    Phi = diag(u);
+    
+    % Generate H_NLoS for all subcarriers
+    H_NLoS = zeros(Nr, Nt, N);
+    for n = 0:N-1
+        phase = exp(1j*2*pi*B*n*tau_nl/N);
+        H_NLoS(:,:,n) = gamma_nl * hnl * H_rt * Phi * H_br * phase;
+    end
+end  
+
 
 % Function to generate cascaded channel components
 function [H_br, H_rt] = generate_H_br_H_rt(Nb, Nr, Nt)
 
-    [~,~,~,~,~,~,~,~, angles] = computeGeometricParameters();
+    [~,~,~,~,~,~,~,angles] = computeGeometricParameters();
+    lambda = 3e8/2e7;
     psi_br = angles.bs_to_ris.azimuth;
     phi_abr = angles.bs_to_ris.elevation_azimuth;
     phi_ebr = angles.bs_to_ris.elevation_angle;
-
-    H_br = generate_channel_with_steering(Nr, Nb, phi_abr, phi_ebr, psi_br, lambda, lambda/2, d);
+    d = lambda/2;
+    H_br = generate_H_br(Nr, Nb, phi_abr, phi_ebr, psi_br, lambda, lambda/2, lambda/2);
 
     psi_rt = angles.ris_to_target.azimuth;
-    phi_art = angles.ris_to_target.elevation_azimuth;
+    phi_art = angles.ris_to_target.elevation_angle;
     phi_ert = angles.ris_to_target.elevation_angle;
 
-    H_rt = generate_channel_with_steering(Nt, Nr, phi_art, phi_ert, psi_rt, lambda, lambda/2, d);
+    H_rt = generate_H_rt(Nt, Nr, phi_art, phi_ert, psi_rt, lambda, lambda/2, lambda/2);
 end
 
 function [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters()
@@ -287,16 +389,16 @@ end
 
 
 % Example usage
-function H_br = generate_channel_with_steering(Nr, Nb, phi_abr, phi_ebr, psi_br, lambda, dr, d)
+function H_br = generate_H_br(Nr, Nb, phi_abr, phi_ebr, psi_br, lambda, dr, d)
     % Generate steering vectors
     a_psi_br = generate_a_psi_br(Nr, psi_br, lambda, d);
-    a_phi_abr = generate_aphi_abr(sqrt(Nb), sqrt(Nb), phi_abr, phi_ebr, lambda, dr);
+    a_phi_abr = generate_aphi_abr(3, 2, phi_abr, phi_ebr, lambda, dr);
     
     % Compute H_br as outer product of steering vectors
     H_br = a_phi_abr * a_psi_br';
 end
 
-function H_rt = generate_Hrt(Nt, Nr, phi_art, phi_ert, psi_rt, lambda, dr, d)
+function H_rt = generate_H_rt(Nt, Nr, phi_art, phi_ert, psi_rt, lambda, dr, d)
     a_psi_rt = generate_a_psi_rt(Nt, psi_rt, lambda, d);
     a_phi_art = generate_a_phi_art(sqrt(Nt), sqrt(Nr), phi_art, phi_ert, lambda, dr);
 
