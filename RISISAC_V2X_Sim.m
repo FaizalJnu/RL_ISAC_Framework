@@ -15,6 +15,7 @@ classdef RISISAC_V2X_Sim < handle
         lambda = 3e8/28e9;
         h_l;
         h_nl;
+        gamma;
 
         speed = 10
         end_x = 1000
@@ -82,8 +83,8 @@ classdef RISISAC_V2X_Sim < handle
             rho_r = 1;
             theta = 2*pi*rand(obj.Nr,1);
             u = rho_r * exp(1j*theta);
-            obj.Phi = diag(u);
-            obj.Phi = eye(obj.Nr);
+            obj.Phi = diag(u); 
+            % obj.Phi = eye(obj.Nr);
         end
         
         function [H_bt, H_br, H_rt] = generate_channels(obj, Nt, Nr, Nb)
@@ -96,17 +97,17 @@ classdef RISISAC_V2X_Sim < handle
             [~,~,~,~,~,~,~,angles] = obj.computeGeometricParameters();
             
             % Generate BS-Target channel
-            H_bt = generate_H_bt(obj, Nt, Nr, angles, lambda, d);
+            H_bt = generate_H_bt(obj, Nt, Nb, angles, lambda, d);
             
             % Generate BS-RIS and RIS-Target channels
             [H_br, H_rt] = generate_H_br_H_rt(obj, Nb, Nr, Nt, angles, lambda, d, dr);
         end
 
-        function H_bt = generate_H_bt(obj, Nt, Nr, angles, lambda, d)
-            psi_bt = angles.bs_to_target.aoa_in;
-            psi_tb = angles.bs_to_target.aoa_out;
+        function H_bt = generate_H_bt(obj, Nt, Nb, angles, lambda, d)
+            psi_bt = angles.bs_to_target_transmit;
+            psi_tb = angles.bs_to_target_receive;
             
-            a_psi_bt = compute_a_psi(obj, Nr, psi_bt, lambda, d);
+            a_psi_bt = compute_a_psi(obj, Nb, psi_bt, lambda, d);
             a_psi_tb = compute_a_psi(obj, Nt, psi_tb, lambda, d);
             
             H_bt = a_psi_tb * a_psi_bt';
@@ -166,7 +167,7 @@ classdef RISISAC_V2X_Sim < handle
             a_phi = a_phi / sqrt(N2);
         end
 
-        function H_Los = generate_H_Los(H_bt, Nt, Nr, Nb)
+        function H_Los = generate_H_Los(obj, H_bt, Nt, Nr, Nb)
             % Parameters
             K_dB = 4; % Rician K-factor in dB
             K = 10^(K_dB/10);
@@ -185,11 +186,11 @@ classdef RISISAC_V2X_Sim < handle
             % System parameters
             B = 20e6; % Bandwidth (20 MHz)
             N = 2048; % FFT size
-            [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters();
+            [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters(obj);
             tau_l = delays.line_of_sight;
             
             % Generate H_Los for all subcarriers with correct dimensions Nt × Nr
-            H_Los = zeros(Nt, Nr, N);
+            H_Los = zeros(Nt, Nb, N);
             
             for n = 1:N
                 phase = exp(1j*2*pi*B*(n-1)*tau_l/N);
@@ -198,7 +199,7 @@ classdef RISISAC_V2X_Sim < handle
             end
         end
         
-        function H_NLoS = generate_H_NLoS(H_rt, H_br, Nt, Nr, Nb)
+        function H_NLoS = generate_H_NLoS(obj, H_rt, H_br, Nt, Nr, Nb)
             % Parameters
             K_dB = 4; % Rician K-factor in dB
             K = 10^(K_dB/10);
@@ -217,14 +218,14 @@ classdef RISISAC_V2X_Sim < handle
             % System parameters
             B = 20e6; % Bandwidth (20 MHz)
             N = 2048; % FFT size
-            [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters();
+            [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters(obj);
             tau_nl = delays.non_line_of_sight;
             
             % Generate RIS reflection parameters (u)
             rho_r = 1;
             theta = 2*pi*rand(Nr,1);
             u = rho_r * exp(1j*theta);
-            Phi = diag(u);
+            obj.Phi = diag(u);
             
             % Generate H_NLoS for all subcarriers
             H_NLoS = zeros(Nt, Nb, N);  % Changed to Nt × Nr
@@ -232,7 +233,7 @@ classdef RISISAC_V2X_Sim < handle
             for n = 1:N
                 phase = exp(1j*2*pi*B*(n-1)*tau_nl/N);
                 % H_rt(Nt×Nr) * Phi(Nr×Nr) * H_br(Nr×Nb)
-                H_NLoS(:,:,n) = gamma_nl * obj.h_nl * H_rt * Phi * H_br * phase;
+                H_NLoS(:,:,n) = gamma_nl * obj.h_nl * H_rt * obj.Phi * H_br * phase;
             end
         end
         
@@ -329,9 +330,9 @@ classdef RISISAC_V2X_Sim < handle
             R_min = computeR_min(obj);
             reward = obj.computeReward(peb, rate, R_min);
 
-            if reward<=0
-                reward = rand(0.0,1.8);
-            end
+            % if reward<=0
+            %     reward = rand(0.0,1.8);
+            % end
             
             % Get next state
             next_state = obj.getState();
@@ -392,11 +393,8 @@ classdef RISISAC_V2X_Sim < handle
 
         % ! -------------------- PEB COMPUTATION PART STARTS HERE --------------------        
 
-        function [R_min] = computeR_min(obj)
+        function [R_min] = computeR_min(obj, gamma)
             B = obj.B;
-            SNR = 90;   % SNR in dB
-            gamma = 10^(SNR/10);  % Linear SNR
-
             % Shannon capacity formula for baseline
             R_theoretical = B * log2(1 + gamma);
 
@@ -452,11 +450,23 @@ classdef RISISAC_V2X_Sim < handle
             % TODO: MAIN POINT OF GETTING STUCK
             % ! SIZE OF MATRICES IS NOT COMPATIBLE
             % Calculate effective channel
-            H_eff = obj.H_bt + obj.H_rt * obj.Phi * obj.H_br;
+            % Option 1: Project down to Nt×Nt space
+            % H_eff = (H_bt + H_rt * Phi * H_br) * (eye(obj.Nr)/sqrt(obj.Nr));  % This will give us 4×4
+
+            % Option 2: Use SVD to get dominant modes
+            [U, S, V] = svd(obj.H_bt + obj.H_rt * obj.Phi * obj.H_br);
+            H_eff = U(:, 1:obj.Nt) * S(1:obj.Nt, 1:obj.Nt) * V(:, 1:obj.Nt)';
             
-            % SNR calculation
-            SNR = 90; % dB
-            gamma = 10^(SNR/10);
+            % SNR calculationhH
+            % SNR = 
+            % SNR = 90; % dB
+            H_Los = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nr, obj.Nb);
+            % H_Los_proj = H_Los * (eye(obj.Nr)/sqrt(obj.Nr));
+            HNLos = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
+            H_combined = H_Los + HNLos; 
+            Wx = computeWx(obj);
+            Pb =  norm(Wx)^2;
+            obj.gamma = Pb * norm(H_combined * W, 'fro')^2 / sigma_c^2;
             
             % Calculate communication rate
             B = obj.B; % Bandwidth
@@ -503,9 +513,9 @@ classdef RISISAC_V2X_Sim < handle
                 peb = peb * (1 + (R_min - obj.rate)/R_min);  % Penalty for rate constraint violation
             end
 
-            if peb > 12
-                peb = rand(0,12);
-            end
+            % if peb > 12
+            %     peb = rand(0,12);
+            % end
             
             % Store additional metrics
             additionalMetrics = struct(...
@@ -883,7 +893,7 @@ classdef RISISAC_V2X_Sim < handle
             psi_tb = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, d);
             
             [A1, A2, A3, A4] = computediagonalmatrics(obj, N, B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
-            [a_rt, a_bt_in, a_br, a_bt_out] = computeAmplitudeMatrices(obj, angles.ris_to_target.aoa, angles.bs_to_target.aoa_in, angles.bs_to_target.aoa_out);
+            [a_rt, a_bt_in, a_br, a_bt_out] = computeAmplitudeMatrices(obj, angles.ris_to_target.aoa, angles.bs_to_target_transmit, angles.bs_to_target_receive);
             [Jzao, ~] = calculateJacobianMatrix(obj, Pb, sigma_s, N, Wx, H_LoS, H_NLoS, ...
                 A1, A2, A3, A4, ...
                 a_rt, a_bt_in, a_br, a_bt_out, ...
@@ -924,8 +934,12 @@ classdef RISISAC_V2X_Sim < handle
             
             % Calculate mu for each n
             mu = zeros(size(Wx));
+            H_Los = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nr, obj.Nb);
+            % H_Los_proj = H_Los * (eye(obj.Nr)/sqrt(obj.Nr));
+            HNLos = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
+            % H_combined = H_Los_proj + HNLos;
             for n = 1:N
-                mu(:,n) = (H_LoS(:,:,n) + H_NLoS(:,:,n)) * Wx(:,n);
+                mu(:,n) = (H_Los(:,:,n) + HNLos(:,:,n)) * Wx(:,n);
             end
 
             [~, ~, ~, ~, ~, ~, ~, angles] = computeGeometricParameters(obj);
@@ -953,13 +967,17 @@ classdef RISISAC_V2X_Sim < handle
                 d_mu_array = cell(7, 1);
                 
                 % Partial derivatives with respect to each parameter
-                d_mu_array{1} = A1 * a_vec(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2) * a_vec(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2)' * Wx(:,n);  % d_mu_d_tau
+                d_mu_array{1} = A1 * a_vec(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2) * ...
+                a_vec(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2)' * Wx(:,n);  % d_mu_d_tau
                 
-                d_mu_array{2} = A2 * a_vec(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2) * compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, obj.lambda, obj.lambda/2)' * ...          % d_mu_d_tau_rt
-                    obj.phi * compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2) * a_vec(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2)' * ...
+                d_mu_array{2} = A2 * a_vec(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2) * ...
+                    compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, obj.lambda, obj.lambda/2)' * ...          % d_mu_d_tau_rt
+                    obj.phi * compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2) * ...
+                    a_vec(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2)' * ...
                     Wx(:,n);
                 
-                d_mu_array{3} = A3 * a_rt * a_vec(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2) * compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, lambda, lambda/2)' * ...          % d_mu_d_psi_rt
+                d_mu_array{3} = A3 * a_rt * a_vec(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2) * ...
+                    compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, lambda, lambda/2)' * ...          % d_mu_d_psi_rt
                     obj.phi * compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2) * ...
                     a_vec(obj, obj.Nt, psi_br, obj.lambda, obj.lambda/2)' * Wx(:,n);
                 
