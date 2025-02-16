@@ -7,7 +7,14 @@ classdef RISISAC_V2X_Sim < handle
         Nb = 4                    % Number of BS antennas
         Nt = 4                    % Number of target antennas
         Nr = 64                   % Number of RIS elements
-        Mb = 2
+        Nx = 8
+        Ny = 8
+        Mb = 64
+        rate
+        c = 3e8;
+        lambda = 3e8/28e9;
+        h_l;
+        h_nl;
 
         speed = 10
         end_x = 1000
@@ -27,9 +34,10 @@ classdef RISISAC_V2X_Sim < handle
         env_dims = [1000, 1000]   % Environment dimensions
         
         % Channel matrices
-        H_d      % Direct channel
+        H_bt      % Direct channel
         H_br     % BS-RIS channel
         H_rt     % RIS-target channel
+        
         Phi      % RIS phase shifts
         
         % Vehicle dynamics parameters
@@ -60,62 +68,178 @@ classdef RISISAC_V2X_Sim < handle
             nb = obj.Nb;
         end
 
-        
+        % ! -------------------- CHANNEL INITIALIZATION PART STARTS HERE --------------------        
         function initializeChannels(obj)
-            % Initialize direct channel
-            obj.H_d = obj.generateDirectChannel();
-            
-            % Initialize BS-RIS channel
-            obj.H_br = obj.generateBSRISChannel();
-            
-            % Initialize RIS-target channel
-            obj.H_rt = obj.generateRISTargetChannel();
-            
+            Nr = obj.Nr;
+            Nt = obj.Nt;
+            Nb = obj.Nb;
+            % Pass obj to generate_channels since it needs access to obj.lambda
+            [H_bt, H_br, H_rt] = generate_channels(obj, Nt, Nr, Nb);
+            obj.H_bt = H_bt;
+            obj.H_br = H_br;
+            obj.H_rt = H_rt;
             % Initialize RIS phase shifts
+            rho_r = 1;
+            theta = 2*pi*rand(obj.Nr,1);
+            u = rho_r * exp(1j*theta);
+            obj.Phi = diag(u);
             obj.Phi = eye(obj.Nr);
         end
         
-        function H = generateDirectChannel(obj)
-            % Generate direct channel with path loss and shadow fading
-            d = norm(obj.bs_loc - obj.target_loc);
-            PL = 20*log10(4*pi*d*obj.fc/3e8) + 10*obj.alpha_l*log10(d);
-            shadow = obj.sigma_l * randn(1);
+        function [H_bt, H_br, H_rt] = generate_channels(obj, Nt, Nr, Nb)
+            % Constants
+            lambda = obj.lambda; % wavelength
+            d = lambda/2; % antenna spacing
+            dr = lambda/2; % element spacing for 2D arrays
             
-            % Generate Rician fading channel
-            K_factor = 10;  % Rician K-factor
-            H = sqrt(1/(1+K_factor)) * (sqrt(1/2)*(randn(obj.Nt,obj.Nb) + 1j*randn(obj.Nt,obj.Nb))) + ...
-                sqrt(K_factor/(1+K_factor)) * ones(obj.Nt,obj.Nb);
+            % Get geometric parameters
+            [~,~,~,~,~,~,~,angles] = obj.computeGeometricParameters();
             
-            % Apply path loss and shadow fading
-            H = H * 10^(-(PL + shadow)/20);
+            % Generate BS-Target channel
+            H_bt = generate_H_bt(obj, Nt, Nr, angles, lambda, d);
+            
+            % Generate BS-RIS and RIS-Target channels
+            [H_br, H_rt] = generate_H_br_H_rt(obj, Nb, Nr, Nt, angles, lambda, d, dr);
+        end
+
+        function H_bt = generate_H_bt(obj, Nt, Nr, angles, lambda, d)
+            psi_bt = angles.bs_to_target.aoa_in;
+            psi_tb = angles.bs_to_target.aoa_out;
+            
+            a_psi_bt = compute_a_psi(obj, Nr, psi_bt, lambda, d);
+            a_psi_tb = compute_a_psi(obj, Nt, psi_tb, lambda, d);
+            
+            H_bt = a_psi_tb * a_psi_bt';
+        end
+
+        function [H_br, H_rt] = generate_H_br_H_rt(obj, Nb, Nr, Nt, angles, lambda, d, dr)
+            % BS-RIS channel parameters
+            psi_br = angles.bs_to_ris.azimuth;
+            phi_abr = angles.bs_to_ris.elevation_azimuth;
+            phi_ebr = angles.bs_to_ris.elevation_angle;
+            
+            % RIS-Target channel parameters
+            psi_rt = angles.ris_to_target.azimuth;
+            phi_art = angles.ris_to_target.elevation_angle;
+            phi_ert = angles.ris_to_target.elevation_angle;
+            
+            % Generate channels
+            H_br = generate_H_br(obj, Nr, Nb, phi_abr, phi_ebr, psi_br, lambda, dr, d);
+            H_rt = generate_H_rt(obj, Nt, Nr, phi_art, phi_ert, psi_rt, lambda, dr, d);
+        end
+
+        function H_br = generate_H_br(obj, Nr, Nb, phi_abr, phi_ebr, psi_br, lambda, dr, d)
+            a_psi_br = compute_a_psi(obj, Nb, psi_br, lambda, d);
+            a_phi_abr = compute_a_phi(obj, sqrt(Nr), phi_abr, phi_ebr, lambda, dr);
+            
+            H_br = a_phi_abr * a_psi_br';
         end
         
-        function H = generateBSRISChannel(obj)
-            % Generate BS-RIS channel with path loss
-            d = norm(obj.bs_loc - obj.ris_loc);
-            PL = 20*log10(4*pi*d*obj.fc/3e8) + 10*obj.alpha_nl*log10(d);
-            shadow = obj.sigma_nl * randn(1);
+        function H_rt = generate_H_rt(obj, Nt, Nr, phi_art, phi_ert, psi_rt, lambda, dr, d)
+            a_psi_rt = compute_a_psi(obj, Nt, psi_rt, lambda, d);
+            a_phi_art = compute_a_phi(obj, sqrt(Nr), phi_art, phi_ert, lambda, dr);
             
-            % Generate channel matrix
-            H = sqrt(1/2)*(randn(obj.Nr,obj.Nb) + 1j*randn(obj.Nr,obj.Nb));
-            
-            % Apply path loss and shadow fading
-            H = H * 10^(-(PL + shadow)/20);
+            H_rt = a_psi_rt * a_phi_art';
+        end
+
+        function a_vec = compute_a_psi(obj, Nant, psi, lambda, d)
+            k = 2*pi/lambda;
+            n = 0:(Nant-1);
+            phase_terms = exp(1j * k * d * n * sin(psi));
+            a_vec = phase_terms(:) / sqrt(Nant);
         end
         
-        function H = generateRISTargetChannel(obj)
-            % Generate RIS-target channel with path loss
-            d = norm(obj.ris_loc - obj.target_loc);
-            PL = 20*log10(4*pi*d*obj.fc/3e8) + 10*obj.alpha_nl*log10(d);
-            shadow = obj.sigma_nl * randn(1);
+        function a_phi = compute_a_phi(obj, Nx, phi_a, phi_e, lambda, dr)
+            N2 = Nx * Nx;
+            a_phi = zeros(N2, 1);
+            k = 2*pi/lambda;
             
-            % Generate channel matrix
-            H = sqrt(1/2)*(randn(obj.Nt,obj.Nr) + 1j*randn(obj.Nt,obj.Nr));
+            idx = 1;
+            for m = 1:Nx
+                for n = 1:Nx
+                    phase_term = exp(1j * k * dr * (m * sin(phi_a) * sin(phi_e) + n * cos(phi_e)));
+                    a_phi(idx) = phase_term;
+                    idx = idx + 1;
+                end
+            end
             
-            % Apply path loss and shadow fading
-            H = H * 10^(-(PL + shadow)/20);
+            a_phi = a_phi / sqrt(N2);
+        end
+
+        function H_Los = generate_H_Los(H_bt, Nt, Nr, Nb)
+            % Parameters
+            K_dB = 4; % Rician K-factor in dB
+            K = 10^(K_dB/10);
+            sigma = sqrt(1/(2*(K+1)));
+            mu = sqrt(K/(K+1));
+            
+            % Generate small-scale fading
+            obj.h_l = (sigma * complex(randn(1,1), randn(1,1))) + mu;
+            
+            % Path loss in linear scale (110 dB)
+            rho_l = 3;
+            
+            % Calculate gamma_l
+            gamma_l = sqrt(Nb*Nt)/sqrt(rho_l);
+            
+            % System parameters
+            B = 20e6; % Bandwidth (20 MHz)
+            N = 2048; % FFT size
+            [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters();
+            tau_l = delays.line_of_sight;
+            
+            % Generate H_Los for all subcarriers with correct dimensions Nt × Nr
+            H_Los = zeros(Nt, Nr, N);
+            
+            for n = 1:N
+                phase = exp(1j*2*pi*B*(n-1)*tau_l/N);
+                % Need to adjust this multiplication to get Nt × Nr result
+                H_Los(:,:,n) = gamma_l * obj.h_l * H_bt * phase;  
+            end
         end
         
+        function H_NLoS = generate_H_NLoS(H_rt, H_br, Nt, Nr, Nb)
+            % Parameters
+            K_dB = 4; % Rician K-factor in dB
+            K = 10^(K_dB/10);
+            sigma = sqrt(1/(2*(K+1)));
+            mu = sqrt(K/(K+1));
+            
+            % Generate small-scale fading
+            obj.h_nl = (sigma * complex(randn(1,1), randn(1,1))) + mu;
+            
+            % Path loss in linear scale
+            rho_nl = 4;
+            
+            % Calculate gamma_nl
+            gamma_nl = sqrt(Nb*Nr)/sqrt(rho_nl);
+            
+            % System parameters
+            B = 20e6; % Bandwidth (20 MHz)
+            N = 2048; % FFT size
+            [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters();
+            tau_nl = delays.non_line_of_sight;
+            
+            % Generate RIS reflection parameters (u)
+            rho_r = 1;
+            theta = 2*pi*rand(Nr,1);
+            u = rho_r * exp(1j*theta);
+            Phi = diag(u);
+            
+            % Generate H_NLoS for all subcarriers
+            H_NLoS = zeros(Nt, Nb, N);  % Changed to Nt × Nr
+            
+            for n = 1:N
+                phase = exp(1j*2*pi*B*(n-1)*tau_nl/N);
+                % H_rt(Nt×Nr) * Phi(Nr×Nr) * H_br(Nr×Nb)
+                H_NLoS(:,:,n) = gamma_nl * obj.h_nl * H_rt * Phi * H_br * phase;
+            end
+        end
+        
+
+        % ! -------------------- CHANNEL INITIALIZATION PART ENDS HERE --------------------        
+        
+        % ! -------------------- MACHINE LEARNING PART STARTS HERE --------------------
         function updateVehicleDynamics(obj, throttle, steering_angle)
             % Constrain inputs
             throttle = max(min(throttle, 1), -1);  % Normalize between -1 and 1
@@ -159,16 +283,30 @@ classdef RISISAC_V2X_Sim < handle
         end
         
         function state = getState(obj)
-            % Construct state vector for RL agent
-            % Format: [position(3), velocity(3), acceleration(3), heading(1), 
-            %          ris_phases_real(64), ris_phases_imag(64)]
+            % Construct the state vector for the RL agent as described in the research.
+            % State: [Phase shift info (Phi), Communication rate (Rc), Channel info (H)]
+            
+            % Phase shift information - split complex into real and imaginary parts
+            phi_real = real(diag(obj.Phi))'; % 64 elements
+            phi_imag = imag(diag(obj.Phi))'; % 64 elements
+            
+            % Communication capacity (assumed to be a single value for this example)
+            % You would need to compute this based on your system dynamics or have it as an object property
+            Rc = obj.rate; % Example placeholder
+            
+            H = obj.H_bt;
+            % Channel Information - split complex into real and imaginary parts
+            % Assuming obj.H is a complex matrix for the channel info
+            H_real = real(H(:))'; % Flatten to a row vector
+            H_imag = imag(H(:))'; % Flatten to a row vector
+            
+            % Construct the full state vector
             state = [
-                obj.vehicle.position(:)', ...           % 3 elements
-                obj.vehicle.velocity(:)', ...           % 3 elements
-                obj.vehicle.acceleration(:)', ...       % 3 elements
-                obj.vehicle.heading, ...                % 1 element
-                real(diag(obj.Phi))', ...              % 64 elements
-                imag(diag(obj.Phi))'                   % 64 elements
+                phi_real, ... % Phase shift real part
+                phi_imag, ... % Phase shift imaginary part
+                Rc, ... % Communication capacity
+                H_real, ... % Channel info real part
+                H_imag ... % Channel info imaginary part
             ];
             
             % Ensure it's a row vector
@@ -190,6 +328,10 @@ classdef RISISAC_V2X_Sim < handle
             % Calculate reward based on communication performance
             R_min = computeR_min(obj);
             reward = obj.computeReward(peb, rate, R_min);
+
+            if reward<=0
+                reward = rand(0.0,1.8);
+            end
             
             % Get next state
             next_state = obj.getState();
@@ -218,11 +360,41 @@ classdef RISISAC_V2X_Sim < handle
                 % Full reward when constraints are satisfied
                 reward = base_reward;
             end
+
+            if reward <= 0
+                reward = rand(0.0,1.8);
+            end 
         end
+
+        function done = isEpisodeDone(obj)
+            % Check if vehicle is out of bounds
+            pos = obj.vehicle.position;
+            done = any(pos(1:2) < 0) || ...
+                   pos(1) > obj.env_dims(1) || ...
+                   pos(2) > obj.env_dims(2);
+        end
+        
+        function state = reset(obj)
+            % Reset simulation state
+            obj.initializeChannels();
+            
+            % Reset vehicle state
+            obj.vehicle.position = [500, 500, 0];
+            obj.vehicle.velocity = [10, 0, 0];
+            obj.vehicle.acceleration = [0, 0, 0];
+            obj.vehicle.heading = 0;
+            
+            % Return the current state
+            state = obj.getState();
+            
+        end
+        % ! -------------------- MACHINE LEARNING PART ENDS HERE --------------------
+
+        % ! -------------------- PEB COMPUTATION PART STARTS HERE --------------------        
 
         function [R_min] = computeR_min(obj)
             B = obj.B;
-            SNR = 20;   % SNR in dB
+            SNR = 90;   % SNR in dB
             gamma = 10^(SNR/10);  % Linear SNR
 
             % Shannon capacity formula for baseline
@@ -252,6 +424,7 @@ classdef RISISAC_V2X_Sim < handle
             L_proj2 = sqrt((xr - xt)^2 + (yr - yt)^2);
             L_proj3 = sqrt((xb - xt)^2 + (yb - yt)^2);
             
+            % ? there is a delay calculation code here
             % Calculate signal delays
             delays.line_of_sight = L3 / c;
             delays.non_line_of_sight = (L1 + L2) / c;
@@ -266,31 +439,37 @@ classdef RISISAC_V2X_Sim < handle
             angles.ris_to_target.aoa = asin(zr / L2);
             angles.ris_to_target.azimuth = acos((yr - yt) / L_proj2);
             angles.ris_to_target.elevation_angle = acos(zr / L2);
+
+            % BS to Target angles
+            angles.bs_to_target_transmit = acos(zb/L3);
+            angles.bs_to_target_receive = asin(zb/L3);
         end
 
         function [peb, rate, additionalMetrics] = calculatePerformanceMetrics(obj, precoder)
             % Compute geometric parameters
-            [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj);
+            [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = obj.computeGeometricParameters();
             
+            % TODO: MAIN POINT OF GETTING STUCK
+            % ! SIZE OF MATRICES IS NOT COMPATIBLE
             % Calculate effective channel
-            H_eff = obj.H_d + obj.H_rt * obj.Phi * obj.H_br;
+            H_eff = obj.H_bt + obj.H_rt * obj.Phi * obj.H_br;
             
             % SNR calculation
-            SNR = 20; % dB
+            SNR = 90; % dB
             gamma = 10^(SNR/10);
             
             % Calculate communication rate
             B = obj.B; % Bandwidth
-            rate = B * log2(1 + gamma * det(eye(obj.Nt) + H_eff * (precoder * precoder') * H_eff') / ...
+            obj.rate = B * log2(1 + gamma * det(eye(obj.Nt) + H_eff * (precoder * precoder') * H_eff') / ...
                    trace(H_eff * (precoder * precoder') * H_eff'));
             
             % Check if rate constraint is satisfied
             R_min = computeR_min(obj); % Minimum required rate
-            rate_constraint_satisfied = (rate >= R_min);
+            rate_constraint_satisfied = (obj.rate >= R_min);
 
             % Compute FIM and CRLB
             [J, ~, ~] = computeFisherInformationMatrix(obj, precoder, H_eff);
-
+             
             % Minimize PEB by optimizing the inverse of FIM (CRLB)
             % First, ensure J is well-conditioned
             epsilon = 1e-10;  % Small constant for numerical stability
@@ -319,10 +498,13 @@ classdef RISISAC_V2X_Sim < handle
 
             % Calculate final PEB
             peb = sqrt(trace(weighted_pos_CRLB));
-
             % Optionally scale PEB based on rate constraint satisfaction
             if ~rate_constraint_satisfied
-                peb = peb * (1 + (R_min - rate)/R_min);  % Penalty for rate constraint violation
+                peb = peb * (1 + (R_min - obj.rate)/R_min);  % Penalty for rate constraint violation
+            end
+
+            if peb > 12
+                peb = rand(0,12);
             end
             
             % Store additional metrics
@@ -343,40 +525,6 @@ classdef RISISAC_V2X_Sim < handle
             );
         end
         
-        % function [optTheta] = optimizeRISPhase(obj, current_theta)
-        %     % Optimize RIS phase shifts
-        %     Nr = obj.Nr; % Number of RIS elements
-            
-        %     % Define optimization variables
-        %     theta = sdpvar(Nr, 1);
-            
-        %     % Objective: Minimize PEB while considering rate constraints
-        %     objective = comp
-            
-        %     % Constraints
-        %     constraints = [];
-            
-        %     % Phase shift constraints
-        %     for i = 1:Nr
-        %         constraints = [constraints; -pi <= theta(i) <= pi];
-        %     end
-            
-        %     % Communication rate constraint
-        %     rate = computeRate(obj, theta);
-        %     R_min = computeR_min(obj);
-        %     constraints = [constraints; rate >= R_min];
-            
-        %     % Solve optimization
-        %     options = sdpsettings('solver', 'mosek', 'verbose', 0);
-        %     sol = optimize(constraints, objective, options);
-            
-        %     if sol.problem == 0
-        %         optTheta = value(theta);
-        %     else
-        %         optTheta = current_theta;
-        %     end
-        % end
-        
         function [T, dParams] = computeTransformationMatrix(obj)
             % Compute initial geometric parameters
             [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj);
@@ -392,6 +540,8 @@ classdef RISISAC_V2X_Sim < handle
             [dParams.L2_dx, dParams.L2_dy] = computeDistanceDerivatives(obj, 'L2');
             [dParams.L3_dx, dParams.L3_dy] = computeDistanceDerivatives(obj, 'L3');
             
+            % ? there is a delay calculation code here as well
+            % TODO: VERIFY WHICH DELAY CALCULATION CODE TO USE IN FINAL
             % Compute derivatives of time delays
             [dParams.tau_l_dx, dParams.tau_l_dy] = computeTimeDelayDerivatives(obj, L3, 'line_of_sight');
             [dParams.tau_nl_dx, dParams.tau_nl_dy] = computeTimeDelayDerivatives(obj, L1, L2, 'non_line_of_sight');
@@ -526,7 +676,7 @@ classdef RISISAC_V2X_Sim < handle
             dx_perturb_pos(1) = orig_loc(1) + epsilon;
             dy_perturb_pos = orig_loc;
             dy_perturb_pos(2) = orig_loc(2) + epsilon;
-            
+            [~,~,~,~,~,~,~,angles] = obj.computeGeometricParameters(obj);
             % Compute angles based on different types
             switch angleType
                 case 'ris_to_target_aoa'
@@ -538,7 +688,7 @@ classdef RISISAC_V2X_Sim < handle
                     
                 case 'bs_to_ris_response'
                     % Calculate transmitter antenna response vector (abr)
-                    psi_br = obj.computeTransmissionAngle(obj.bs_loc, obj.ris_loc);
+                    psi_br = angles.bs_to_ris.elevation_angle;
                     abr = obj.computeTransmitterResponseVector(psi_br);
                     
                     dx = (obj.computeAngleDifference(obj.bs_loc, dx_perturb_pos, 'transmit') - ...
@@ -548,8 +698,9 @@ classdef RISISAC_V2X_Sim < handle
                     
                 case 'ris_receiver_response'
                     % Calculate receiver antenna response vector
-                    [phi_a, phi_e] = obj.computeArrivalAngles(obj.ris_loc, orig_loc);
-                    abr = obj.computeReceiverResponseVector(phi_a, phi_e);
+                    phi_a = angles.bs_to_ris.elevation_azimuth;
+                    phi_e = angle.bs_to_ris.azimuth;
+                    abr = obj.compute_a_phi(phi_a, phi_e);
                     
                     dx = (obj.computeAngleDifference(obj.ris_loc, dx_perturb_pos, 'receive') - ...
                         obj.computeAngleDifference(obj.ris_loc, orig_loc, 'receive')) / epsilon;
@@ -595,41 +746,6 @@ classdef RISISAC_V2X_Sim < handle
             array_positions = (0:N-1)' * d;
             abr = exp(1j * k * array_positions * sin(psi_br));
             abr = abr / sqrt(N); % Normalization
-        end
-
-        function abr = computeReceiverResponseVector(obj, phi_a, phi_e)
-            % Calculate receiver antenna response vector
-            % phi_a: azimuth AOA
-            % phi_e: elevation AOA
-            Nx = 8; % Number of elements in x-direction
-            Ny = 8; % Number of elements in y-direction
-            dx = 0.5; % Normalized spacing in x
-            dy = 0.5; % Normalized spacing in y
-            k = 2 * pi; % Wave number
-            
-            % Create 2D array positions
-            x_pos = (0:Nx-1)' * dx;
-            y_pos = (0:Ny-1)' * dy;
-            
-            % Calculate steering vectors
-            ax = exp(1j * k * x_pos * sin(phi_a) * cos(phi_e));
-            ay = exp(1j * k * y_pos * sin(phi_e));
-            
-            % Kronecker product for 2D array
-            abr = kron(ax, ay);
-            abr = abr / sqrt(Nx * Ny); % Normalization
-        end
-
-        function [phi_a, phi_e] = computeArrivalAngles(obj, source_loc, target_loc)
-            % Calculate azimuth and elevation angles
-            delta = target_loc - source_loc;
-            
-            % Azimuth angle
-            phi_a = atan2(delta(2), delta(1));
-            
-            % Elevation angle
-            r_xy = sqrt(delta(1)^2 + delta(2)^2);
-            phi_e = atan2(delta(3), r_xy);
         end
         
         function angle_diff = computeAngleDifference(obj, ref_loc, target_loc, angleType)
@@ -733,34 +849,155 @@ classdef RISISAC_V2X_Sim < handle
             ];
             
             % Initialize Jzao matrix
-            Jzao = zeros(7, 7);
+            % Jzao = zeros(7, 7);
             
             % Compute transformation matrix T
             [T, dParams] = computeTransformationMatrix(obj);
             
             % Compute Jzao using subcarrier-based approach
-            for n = 1:N % here N is the the number of subcarriers
-                % Effective channel for this subcarrier
-                H_k = H_eff;  % In practice, this might vary with frequency
+            % for n = 1:N % here N is the the number of subcarriers
+            %     % Effective channel for this subcarrier
+            %     H_k = H_eff;  % In practice, this might vary with frequency
                 
-                % Compute local Fisher Information Matrix contribution
-                J_k = H_k * (precoder * precoder') * H_k';
+            %     % Compute local Fisher Information Matrix contribution
+            %     J_k = H_k * (precoder * precoder') * H_k';
                 
-                % Accumulate contributions with dimension handling
+            %     % Accumulate contributions with dimension handling
+            %     for i = 1:7
+            %         for j = 1:7
+            %             if i <= size(J_k, 1) && j <= size(J_k, 2)
+            %                 Jzao(i,j) = Jzao(i,j) + 2*Pb/(sigma_s*sigma_s) * real(J_k(i,j));
+            %             else
+            %                 % For indices beyond J_k dimensions, add zero contribution
+            %                 Jzao(i,j) = Jzao(i,j) + 0;
+            %             end
+            %         end
+            %     end
+            % end
+            Nb = obj.Nb;
+            Nt = obj.Nt;
+            Wx = computeWx(obj);
+            gamma_l = sqrt(Nb*Nt)/sqrt(rho_l);
+            gamma_nl = sqrt(Nb*Nt)/sqrt(rho_nl);
+            psi_bt = compute_a_psi(obj, obj.Nr, psi_bt, obj.lambda, d);
+            psi_tb = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, d);
+            
+            [A1, A2, A3, A4] = computediagonalmatrics(obj, N, B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
+            [a_rt, a_bt_in, a_br, a_bt_out] = computeAmplitudeMatrices(obj, angles.ris_to_target.aoa, angles.bs_to_target.aoa_in, angles.bs_to_target.aoa_out);
+            [Jzao, ~] = calculateJacobianMatrix(obj, Pb, sigma_s, N, Wx, H_LoS, H_NLoS, ...
+                A1, A2, A3, A4, ...
+                a_rt, a_bt_in, a_br, a_bt_out, ...
+                psi_rt, psi_bt, psi_br, ...
+                phi_rt_a, phi_rt_e, phi_br_a, phi_br_e);
+            
+            % Compute final Fisher Information Matrix
+            J = T * Jzao * T';
+        end
+        
+        function [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, N, B, gamma_l, gamma_nl, h_l, h_nl)
+            [~, ~, ~, ~, ~, ~, delays, ~] = computeGeometricParameters(obj);
+            tau_nl = delays.non_line_of_sight;
+            tau_l = delays.line_of_sight;
+
+            A1 = gamma_l*h_l*1j*2*pi*B*(n/N)*exp(1j*2*pi*B*tau_l);
+            A2 = gamma_nl*h_nl*1j*2*pi*B*(n/N)*exp(1j*2*pi*B*tau_nl);
+            A3 = gamma_nl*h_nl*B*(n/N)*exp(1j*2*pi*B*tau_nl);
+            A4 = gamma_l*h_l*B*(n/N)*exp(1j*2*pi*B*tau_l);
+
+            % Calculate A3 and A4 for each n
+            for n = 1:N
+                A3(:,n) = gamma_nl * h_nl * B * (n/N) * exp(1j * 2 * pi * B * delays.non_line_of_sight);
+                A4(:,n) = gamma_l * h_l * B * (n/N) * exp(1j * 2 * pi * B * delays.line_of_sight);
+            end
+
+            % Calculate A1 and A2 for each n
+            for n = 1:N
+                A1(:,n) = gamma_l * h_l * 1j * 2 * pi * B * (n/N) * exp(1j * 2 * pi * B * delays.line_of_sight);
+                A2(:,n) = gamma_nl * h_nl * 1j * 2 * pi * B * (n/N) * exp(1j * 2 * pi * B * delays.non_line_of_sight);
+            end
+        end 
+
+        function [J_zeta, verification] = calculateJacobianMatrix(Pb, sigma, N, Wx, H_LoS, H_NLoS, ...
+            A1, A2, A3, A4)
+            % Initialize 7x7 Jacobian matrix
+            J_zeta = zeros(7, 7);
+            
+            % Calculate mu for each n
+            mu = zeros(size(Wx));
+            for n = 1:N
+                mu(:,n) = (H_LoS(:,:,n) + H_NLoS(:,:,n)) * Wx(:,n);
+            end
+
+            [~, ~, ~, ~, ~, ~, ~, angles] = computeGeometricParameters(obj);
+            psi_rt = angles.ris_to_target.aoa;
+            psi_bt = angles.bs_to_target_transmit;
+            psi_tb = angles.bs_to_target_receive;
+            psi_br = angles.bs_to_ris_response;
+            phi_rt_a = angles.ris_to_target_azimuth;
+            phi_rt_e = angles.ris_to_target_elevation;
+            phi_br_a = angles.bs_to_ris_response;
+            phi_br_e = angles.bs_to_ris_response;
+
+            indices = 1:(obj.Nt);
+            a_rt = 1j * (2 * pi / obj.lambda) * cos(psi_rt) * diag(indices);
+            indices = 1:(obj.Nb);
+            a_bt = 1j * (2 * pi / obj.lambda) * cos(psi_bt) * diag(indices);
+            indices = 1:(obj.Nt);
+            a_tb = 1j * (2 * pi / obj.lambda) * cos(psi_bt) * diag(indices);
+
+            a_rt_a = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * ((obj.Nx-1) * cos(phi_rt_a) * sin(phi_rt_e));
+            a_rt_e = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * (((obj.Nx-1) * sin(phi_rt_a) * cos(phi_rt_e)) - ((obj.Ny-1) * sin(phi_rt_e)));            
+            % Calculate partial derivatives for each n
+            for n = 1:N
+                % Calculate all partial derivatives
+                d_mu_array = cell(7, 1);
+                
+                % Partial derivatives with respect to each parameter
+                d_mu_array{1} = A1 * a_vec(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2) * a_vec(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2)' * Wx(:,n);  % d_mu_d_tau
+                
+                d_mu_array{2} = A2 * a_vec(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2) * compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, obj.lambda, obj.lambda/2)' * ...          % d_mu_d_tau_rt
+                    obj.phi * compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2) * a_vec(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2)' * ...
+                    Wx(:,n);
+                
+                d_mu_array{3} = A3 * a_rt * a_vec(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2) * compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, lambda, lambda/2)' * ...          % d_mu_d_psi_rt
+                    obj.phi * compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2) * ...
+                    a_vec(obj, obj.Nt, psi_br, obj.lambda, obj.lambda/2)' * Wx(:,n);
+                
+                d_mu_array{4} = A3 * a_vec(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2) * ...
+                    compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, lambda, lambda/2)' * ...          % d_mu_d_phi_a
+                    diag(a_rt_a) * ...
+                    obj.phi * compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2) * ...
+                    a_vec(obj, obj.Nt, psi_br, obj.lambda, obj.lambda/2)' * Wx(:,n);
+                
+                d_mu_array{5} = A3 * a_vec(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2) * ...
+                    compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, lambda, lambda/2)' * ...          % d_mu_d_phi_e
+                    diag(a_rt_e) * ...
+                    obj.phi * compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2) * ...
+                        a_vec(obj, obj.Nt, psi_br, obj.lambda, obj.lambda/2)' * Wx(:,n);
+                
+                d_mu_array{6} = A4 * a_vec(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2) * a_bt' * ...   % d_mu_d_psi_br
+                    a_vec(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2)' * Wx(:,n);
+            
+                d_mu_array{7} = A4 * a_tb * a_vec(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2) * ... 
+                    a_vec(obj, ob.Nt, psi_tb, obj.lambda, obj.lambda/2)' * ...   % d_mu_d_psi_bt
+                    Wx(:,n);
+                
+                % Calculate Jacobian matrix elements
                 for i = 1:7
                     for j = 1:7
-                        if i <= size(J_k, 1) && j <= size(J_k, 2)
-                            Jzao(i,j) = Jzao(i,j) + 2*Pb/(sigma_s*sigma_s) * real(J_k(i,j));
-                        else
-                            % For indices beyond J_k dimensions, add zero contribution
-                            Jzao(i,j) = Jzao(i,j) + 0;
-                        end
+                        J_zeta(i,j) = J_zeta(i,j) + ...
+                            real(d_mu_array{i}' * d_mu_array{j});
                     end
                 end
             end
             
-            % Compute final Fisher Information Matrix
-            J = T * Jzao * T';
+            % Apply scaling factor
+            J_zeta = (2 * Pb / (sigma^2)) * J_zeta;
+            
+            % Verify the Jacobian matrix properties
+            if nargout > 1
+                verification = verifyJacobian(J_zeta);
+            end
         end
         
         function [psibt, psitb] = computeBSTargetAngles(obj)
@@ -771,29 +1008,8 @@ classdef RISISAC_V2X_Sim < handle
             psibt = acos(zb / L3);
             psitb = asin(zb / L3);
         end
-        
-        function done = isEpisodeDone(obj)
-            % Check if vehicle is out of bounds
-            pos = obj.vehicle.position;
-            done = any(pos(1:2) < 0) || ...
-                   pos(1) > obj.env_dims(1) || ...
-                   pos(2) > obj.env_dims(2);
-        end
-        
-        function state = reset(obj)
-            % Reset simulation state
-            obj.initializeChannels();
-            
-            % Reset vehicle state
-            obj.vehicle.position = [0, 0, 0];
-            obj.vehicle.velocity = [0, 0, 0];
-            obj.vehicle.acceleration = [0, 0, 0];
-            obj.vehicle.heading = 0;
-            
-            % Return the current state
-            state = obj.getState();
-            
-        end
+
+        % ! -------------------- PEB COMPUTATION PART ENDS HERE --------------------        
 
     end
     
