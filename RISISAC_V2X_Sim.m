@@ -15,7 +15,7 @@ classdef RISISAC_V2X_Sim < handle
         lambda = 3e8/28e9;
         h_l;
         h_nl;
-        gamma;
+        gamma_c;
 
         speed = 10
         end_x = 1000
@@ -23,8 +23,9 @@ classdef RISISAC_V2X_Sim < handle
         % Path loss parameters
         alpha_l = 3.2             % Direct path loss exponent
         alpha_nl = 2.2            % RIS path loss exponent
-        sigma_l = 3               % Direct path shadow fading
-        sigma_nl = 4              % RIS path shadow fading
+        rho_l = 3               % Direct path shadow fading
+        rho_nl = 4              % RIS path shadow fading
+        % rho_l = 
         
         % Locations (in meters)
         bs_loc = [900, 100, 20]   % Base station location
@@ -39,7 +40,7 @@ classdef RISISAC_V2X_Sim < handle
         H_br     % BS-RIS channel
         H_rt     % RIS-target channel
         
-        Phi      % RIS phase shifts
+        phi      % RIS phase shifts
         
         % Vehicle dynamics parameters
         vehicle = struct(...
@@ -83,8 +84,8 @@ classdef RISISAC_V2X_Sim < handle
             rho_r = 1;
             theta = 2*pi*rand(obj.Nr,1);
             u = rho_r * exp(1j*theta);
-            obj.Phi = diag(u); 
-            % obj.Phi = eye(obj.Nr);
+            obj.phi = diag(u); 
+            % obj.phi = eye(obj.Nr);
         end
         
         function [H_bt, H_br, H_rt] = generate_channels(obj, Nt, Nr, Nb)
@@ -178,10 +179,10 @@ classdef RISISAC_V2X_Sim < handle
             obj.h_l = (sigma * complex(randn(1,1), randn(1,1))) + mu;
             
             % Path loss in linear scale (110 dB)
-            rho_l = 3;
+            obj.rho_l = 3;
             
             % Calculate gamma_l
-            gamma_l = sqrt(Nb*Nt)/sqrt(rho_l);
+            gamma_l = sqrt(Nb*Nt)/sqrt(obj.rho_l);
             
             % System parameters
             B = 20e6; % Bandwidth (20 MHz)
@@ -189,15 +190,18 @@ classdef RISISAC_V2X_Sim < handle
             [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters(obj);
             tau_l = delays.line_of_sight;
             
-            % Generate H_Los for all subcarriers with correct dimensions Nt × Nr
-            H_Los = zeros(Nt, Nb, N);
+            % Generate H_Los for all subcarriers with correct dimensions Nt × Nb
+            H_Los_3d = zeros(Nt, Nb, N);
             
             for n = 1:N
                 phase = exp(1j*2*pi*B*(n-1)*tau_l/N);
-                % Need to adjust this multiplication to get Nt × Nr result
-                H_Los(:,:,n) = gamma_l * obj.h_l * H_bt * phase;  
+                H_Los_3d(:,:,n) = gamma_l * obj.h_l * H_bt * phase;  
             end
+            
+            % Convert 3D to 2D by averaging over subcarriers
+            H_Los = mean(H_Los_3d, 3);  % Nt × Nb matrix
         end
+        
         
         function H_NLoS = generate_H_NLoS(obj, H_rt, H_br, Nt, Nr, Nb)
             % Parameters
@@ -225,17 +229,20 @@ classdef RISISAC_V2X_Sim < handle
             rho_r = 1;
             theta = 2*pi*rand(Nr,1);
             u = rho_r * exp(1j*theta);
-            obj.Phi = diag(u);
+            obj.phi = diag(u);
             
             % Generate H_NLoS for all subcarriers
-            H_NLoS = zeros(Nt, Nb, N);  % Changed to Nt × Nr
+            H_NLoS_3d = zeros(Nt, Nb, N);
             
             for n = 1:N
                 phase = exp(1j*2*pi*B*(n-1)*tau_nl/N);
-                % H_rt(Nt×Nr) * Phi(Nr×Nr) * H_br(Nr×Nb)
-                H_NLoS(:,:,n) = gamma_nl * obj.h_nl * H_rt * obj.Phi * H_br * phase;
+                % H_rt(Nt×Nr) * phi(Nr×Nr) * H_br(Nr×Nb)
+                H_NLoS_3d(:,:,n) = gamma_nl * obj.h_nl * H_rt * obj.phi * H_br * phase;
             end
-        end
+            
+            % Convert 3D to 2D by averaging over subcarriers
+            H_NLoS = mean(H_NLoS_3d, 3);  % Nt × Nb matrix
+        end        
         
 
         % ! -------------------- CHANNEL INITIALIZATION PART ENDS HERE --------------------        
@@ -285,11 +292,11 @@ classdef RISISAC_V2X_Sim < handle
         
         function state = getState(obj)
             % Construct the state vector for the RL agent as described in the research.
-            % State: [Phase shift info (Phi), Communication rate (Rc), Channel info (H)]
+            % State: [Phase shift info (phi), Communication rate (Rc), Channel info (H)]
             
             % Phase shift information - split complex into real and imaginary parts
-            phi_real = real(diag(obj.Phi))'; % 64 elements
-            phi_imag = imag(diag(obj.Phi))'; % 64 elements
+            phi_real = real(diag(obj.phi))'; % 64 elements
+            phi_imag = imag(diag(obj.phi))'; % 64 elements
             
             % Communication capacity (assumed to be a single value for this example)
             % You would need to compute this based on your system dynamics or have it as an object property
@@ -320,15 +327,14 @@ classdef RISISAC_V2X_Sim < handle
             ris_phases = action(1:obj.Nr); 
             
             % Update RIS phase shifts (normalized between 0 and 2π)
-            obj.Phi = diag(exp(1j * 2 * pi * ris_phases));
+            obj.phi = diag(exp(1j * 2 * pi * ris_phases));
             
             % Calculate performance metrics considering fixed positions
             precoder = eye(obj.Nb) / sqrt(obj.Nb);  % Simple precoder
-            [rate, peb] = obj.calculatePerformanceMetrics(precoder);
-            
+            [obj.rate, peb] = obj.calculatePerformanceMetrics(precoder);
             % Calculate reward based on communication performance
             R_min = computeR_min(obj);
-            reward = obj.computeReward(peb, rate, R_min);
+            reward = obj.computeReward(peb, obj.rate, R_min);
 
             % if reward<=0
             %     reward = rand(0.0,1.8);
@@ -393,10 +399,10 @@ classdef RISISAC_V2X_Sim < handle
 
         % ! -------------------- PEB COMPUTATION PART STARTS HERE --------------------        
 
-        function [R_min] = computeR_min(obj, gamma)
+        function [R_min] = computeR_min(obj)
             B = obj.B;
             % Shannon capacity formula for baseline
-            R_theoretical = B * log2(1 + gamma);
+            R_theoretical = B * log2(1 + obj.gamma_c);
 
             % Set R_min as a fraction of theoretical maximum
             R_min = 0.5 * R_theoretical;
@@ -446,31 +452,26 @@ classdef RISISAC_V2X_Sim < handle
         function [peb, rate, additionalMetrics] = calculatePerformanceMetrics(obj, precoder)
             % Compute geometric parameters
             [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = obj.computeGeometricParameters();
-            
-            % TODO: MAIN POINT OF GETTING STUCK
-            % ! SIZE OF MATRICES IS NOT COMPATIBLE
-            % Calculate effective channel
-            % Option 1: Project down to Nt×Nt space
-            % H_eff = (H_bt + H_rt * Phi * H_br) * (eye(obj.Nr)/sqrt(obj.Nr));  % This will give us 4×4
 
             % Option 2: Use SVD to get dominant modes
-            [U, S, V] = svd(obj.H_bt + obj.H_rt * obj.Phi * obj.H_br);
+            [U, S, V] = svd(obj.H_bt + obj.H_rt * obj.phi * obj.H_br);
             H_eff = U(:, 1:obj.Nt) * S(1:obj.Nt, 1:obj.Nt) * V(:, 1:obj.Nt)';
             
-            % SNR calculationhH
-            % SNR = 
-            % SNR = 90; % dB
             H_Los = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nr, obj.Nb);
             % H_Los_proj = H_Los * (eye(obj.Nr)/sqrt(obj.Nr));
             HNLos = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
             H_combined = H_Los + HNLos; 
-            Wx = computeWx(obj);
+            [Wx,W] = computeWx(obj);
+
             Pb =  norm(Wx)^2;
-            obj.gamma = Pb * norm(H_combined * W, 'fro')^2 / sigma_c^2;
+            sigma_c = sqrt(10^(-100/10));
+
+            obj.gamma_c = Pb * norm(H_combined * W, 'fro')^2 / sigma_c^2;
+            SNR = log10(obj.gamma_c);
             
             % Calculate communication rate
             B = obj.B; % Bandwidth
-            obj.rate = B * log2(1 + gamma * det(eye(obj.Nt) + H_eff * (precoder * precoder') * H_eff') / ...
+            rate = B * log2(1 + obj.gamma_c * det(eye(obj.Nt) + H_eff * (precoder * precoder') * H_eff') / ...
                    trace(H_eff * (precoder * precoder') * H_eff'));
             
             % Check if rate constraint is satisfied
@@ -530,7 +531,7 @@ classdef RISISAC_V2X_Sim < handle
                 'Delays', delays, ...
                 'Angles', angles, ...
                 'SNR', SNR, ...
-                'Gamma', gamma, ...
+                'Gamma', obj.gamma_c, ...
                 'RateConstraintSatisfied', rate_constraint_satisfied ...
             );
         end
@@ -686,7 +687,7 @@ classdef RISISAC_V2X_Sim < handle
             dx_perturb_pos(1) = orig_loc(1) + epsilon;
             dy_perturb_pos = orig_loc;
             dy_perturb_pos(2) = orig_loc(2) + epsilon;
-            [~,~,~,~,~,~,~,angles] = obj.computeGeometricParameters(obj);
+            [~,~,~,~,~,~,~,angles] = obj.computeGeometricParameters();
             % Compute angles based on different types
             switch angleType
                 case 'ris_to_target_aoa'
@@ -824,26 +825,43 @@ classdef RISISAC_V2X_Sim < handle
         end
         
         % transmit signal vector from beamforming matrix calculation
-        function [Wx] = computeWx(obj)
-            Nb = obj.Nb; % Number of base stations
-            Mb = obj.Mb; % Number of beams
-            W = rand(Nb, Mb) + 1j*randn(Nb, Mb); 
-            W = W ./ vecnorm(W); %Normalized vector presentation
+        % function [Wx, W] = computeWx(obj)
+        %     Nb = obj.Nb; % Number of base stations
+        %     Mb = obj.Mb; % Number of beams
+        %     W = rand(Nb, Mb) + 1j*randn(Nb, Mb); 
+        %     W = W ./ vecnorm(W); % Normalized vector presentation
             
-            x = randn(Mb, 1) + 1j*randn(Mb, 1); 
-            Wx = W*x;
+        %     x = randn(Mb, 1) + 1j*randn(Mb, 1); 
+        %     Wx = W*x;
+        % end     
+        
+        function [Wx, W] = computeWx(obj)
+            Nb = obj.Nb;  % Number of base stations
+            Mb = obj.Mb;  % Number of beams
+            N = obj.Ns;    % Number of subcarriers
+            
+            % Generate beamforming matrix W [Nb x Mb]
+            W = rand(Nb, Mb) + 1j*randn(Nb, Mb);
+            W = W ./ vecnorm(W);  % Normalize each column
+            
+            % Generate transmit data x[n] for each subcarrier n
+            % x[n] is Mb x 1 complex Gaussian with zero mean and unit variance
+            X = (randn(Mb, N) + 1j*randn(Mb, N)) / sqrt(2);  % Division by sqrt(2) ensures unit variance
+            
+            % Calculate Wx[n] for all subcarriers
+            Wx = W * X;  % Results in [Nb x N] matrix where each column is Wx[n] for nth subcarrier
         end
         
         function [J, Jzao, T] = computeFisherInformationMatrix(obj, precoder, H_eff)
 
-            Wx = computeWx(obj);
+            [Wx,W] = computeWx(obj);
             Pb =  norm(Wx)^2; 
             B = obj.B;  % Bandwidth
-            N = obj.Ns;
-            SNR = 20;  % 20 Decibels 
+            N = obj.Nt;
+            SNR = log10(obj.gamma_c);
             
             sigma_s = sqrt(SNR/Pb);  % Noise variance (placeholder)
-            lambda = 3e8 / obj.fc;  % Wavelength
+            lambda = obj.lambda;  % Wavelength
             
             % Compute geometric parameters
             [~, ~, ~, ~, ~, ~, delays, angles] = computeGeometricParameters(obj);
@@ -857,48 +875,15 @@ classdef RISISAC_V2X_Sim < handle
                 angles.ris_to_target.elevation_angle; 
                 computeBSTargetAngles(obj)
             ];
-            
-            % Initialize Jzao matrix
-            % Jzao = zeros(7, 7);
-            
-            % Compute transformation matrix T
             [T, dParams] = computeTransformationMatrix(obj);
-            
-            % Compute Jzao using subcarrier-based approach
-            % for n = 1:N % here N is the the number of subcarriers
-            %     % Effective channel for this subcarrier
-            %     H_k = H_eff;  % In practice, this might vary with frequency
-                
-            %     % Compute local Fisher Information Matrix contribution
-            %     J_k = H_k * (precoder * precoder') * H_k';
-                
-            %     % Accumulate contributions with dimension handling
-            %     for i = 1:7
-            %         for j = 1:7
-            %             if i <= size(J_k, 1) && j <= size(J_k, 2)
-            %                 Jzao(i,j) = Jzao(i,j) + 2*Pb/(sigma_s*sigma_s) * real(J_k(i,j));
-            %             else
-            %                 % For indices beyond J_k dimensions, add zero contribution
-            %                 Jzao(i,j) = Jzao(i,j) + 0;
-            %             end
-            %         end
-            %     end
-            % end
             Nb = obj.Nb;
             Nt = obj.Nt;
             Wx = computeWx(obj);
-            gamma_l = sqrt(Nb*Nt)/sqrt(rho_l);
-            gamma_nl = sqrt(Nb*Nt)/sqrt(rho_nl);
-            psi_bt = compute_a_psi(obj, obj.Nr, psi_bt, obj.lambda, d);
-            psi_tb = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, d);
+            gamma_l = sqrt(Nb*Nt)/sqrt(obj.rho_l);
+            gamma_nl = sqrt(Nb*Nt)/sqrt(obj.rho_nl);
             
-            [A1, A2, A3, A4] = computediagonalmatrics(obj, N, B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
-            [a_rt, a_bt_in, a_br, a_bt_out] = computeAmplitudeMatrices(obj, angles.ris_to_target.aoa, angles.bs_to_target_transmit, angles.bs_to_target_receive);
-            [Jzao, ~] = calculateJacobianMatrix(obj, Pb, sigma_s, N, Wx, H_LoS, H_NLoS, ...
-                A1, A2, A3, A4, ...
-                a_rt, a_bt_in, a_br, a_bt_out, ...
-                psi_rt, psi_bt, psi_br, ...
-                phi_rt_a, phi_rt_e, phi_br_a, phi_br_e);
+            [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, N, B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
+            [Jzao] = calculateJacobianMatrix(obj, Pb, sigma_s, N, Wx, A1, A2, A3, A4);
             
             % Compute final Fisher Information Matrix
             J = T * Jzao * T';
@@ -908,11 +893,6 @@ classdef RISISAC_V2X_Sim < handle
             [~, ~, ~, ~, ~, ~, delays, ~] = computeGeometricParameters(obj);
             tau_nl = delays.non_line_of_sight;
             tau_l = delays.line_of_sight;
-
-            A1 = gamma_l*h_l*1j*2*pi*B*(n/N)*exp(1j*2*pi*B*tau_l);
-            A2 = gamma_nl*h_nl*1j*2*pi*B*(n/N)*exp(1j*2*pi*B*tau_nl);
-            A3 = gamma_nl*h_nl*B*(n/N)*exp(1j*2*pi*B*tau_nl);
-            A4 = gamma_l*h_l*B*(n/N)*exp(1j*2*pi*B*tau_l);
 
             % Calculate A3 and A4 for each n
             for n = 1:N
@@ -927,10 +907,9 @@ classdef RISISAC_V2X_Sim < handle
             end
         end 
 
-        function [J_zeta, verification] = calculateJacobianMatrix(Pb, sigma, N, Wx, H_LoS, H_NLoS, ...
-            A1, A2, A3, A4)
+        function [J_zao] = calculateJacobianMatrix(obj, Pb, sigma, N, Wx, A1, A2, A3, A4)
             % Initialize 7x7 Jacobian matrix
-            J_zeta = zeros(7, 7);
+            J_zao = zeros(7, 7);
             
             % Calculate mu for each n
             mu = zeros(size(Wx));
@@ -938,19 +917,21 @@ classdef RISISAC_V2X_Sim < handle
             % H_Los_proj = H_Los * (eye(obj.Nr)/sqrt(obj.Nr));
             HNLos = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
             % H_combined = H_Los_proj + HNLos;
-            for n = 1:N
-                mu(:,n) = (H_Los(:,:,n) + HNLos(:,:,n)) * Wx(:,n);
-            end
+            % for n = 1:N
+            %     mu(:,n) = (H_Los(:,:,n) + HNLos(:,:,n)) * Wx(:,n);
+            % end
+            mu = (H_Los + HNLos)*Wx;
+            
 
             [~, ~, ~, ~, ~, ~, ~, angles] = computeGeometricParameters(obj);
             psi_rt = angles.ris_to_target.aoa;
             psi_bt = angles.bs_to_target_transmit;
             psi_tb = angles.bs_to_target_receive;
-            psi_br = angles.bs_to_ris_response;
-            phi_rt_a = angles.ris_to_target_azimuth;
-            phi_rt_e = angles.ris_to_target_elevation;
-            phi_br_a = angles.bs_to_ris_response;
-            phi_br_e = angles.bs_to_ris_response;
+            psi_br = angles.bs_to_ris.azimuth;
+            phi_rt_a = angles.ris_to_target.azimuth;
+            phi_rt_e = angles.ris_to_target.elevation_angle;
+            phi_br_a = angles.bs_to_ris.elevation_azimuth;
+            phi_br_e = angles.bs_to_ris.elevation_angle;
 
             indices = 1:(obj.Nt);
             a_rt = 1j * (2 * pi / obj.lambda) * cos(psi_rt) * diag(indices);
@@ -960,62 +941,177 @@ classdef RISISAC_V2X_Sim < handle
             a_tb = 1j * (2 * pi / obj.lambda) * cos(psi_bt) * diag(indices);
 
             a_rt_a = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * ((obj.Nx-1) * cos(phi_rt_a) * sin(phi_rt_e));
-            a_rt_e = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * (((obj.Nx-1) * sin(phi_rt_a) * cos(phi_rt_e)) - ((obj.Ny-1) * sin(phi_rt_e)));            
+            a_rt_e = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * (((obj.Nx-1) * sin(phi_rt_a) * cos(phi_rt_e)) - ((obj.Ny-1) * sin(phi_rt_e)));
+            
+            % TODO: implement all the a vector
+            a_vec = compute_a_psi(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2);
+            a_psi_bt = a_vec;
+            a_vec = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2);
+            a_psi_tb = a_vec;
+            a_vec = compute_a_psi(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2);
+            a_psi_rt = a_vec;
+            a_vec = compute_a_psi(obj, obj.Nb, psi_br, obj.lambda, obj.lambda/2);
+            a_psi_br = a_vec;
+
+
+            % TODO: implement all the steering vector
+            a_phi_br = compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2);
+            a_phi_rt = compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, obj.lambda, obj.lambda/2);
+
+            % disp('Intermediate dimensions:')
+            % disp(size(A1 * a_psi_bt))
+            % disp(size(a_psi_tb' * Wx))
+            % disp(size(a_psi_bt * (a_psi_tb' * Wx)))
+
             % Calculate partial derivatives for each n
             for n = 1:N
                 % Calculate all partial derivatives
                 d_mu_array = cell(7, 1);
                 
                 % Partial derivatives with respect to each parameter
-                d_mu_array{1} = A1 * a_vec(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2) * ...
-                a_vec(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2)' * Wx(:,n);  % d_mu_d_tau
+                d_mu_array{1} = (A1 * a_psi_bt) * (a_psi_tb' * Wx(:,n));  % d_mu_d_tau
                 
-                d_mu_array{2} = A2 * a_vec(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2) * ...
-                    compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, obj.lambda, obj.lambda/2)' * ...          % d_mu_d_tau_rt
-                    obj.phi * compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2) * ...
-                    a_vec(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2)' * ...
-                    Wx(:,n);
+                d_mu_array{2} = (A2 * a_psi_rt) * ...
+                    (a_phi_rt' * ...          % d_mu_d_tau_rt
+                    obj.phi * a_phi_br) * ...
+                    (a_psi_br' * ...
+                    Wx(:,n));
                 
-                d_mu_array{3} = A3 * a_rt * a_vec(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2) * ...
-                    compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, lambda, lambda/2)' * ...          % d_mu_d_psi_rt
-                    obj.phi * compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2) * ...
-                    a_vec(obj, obj.Nt, psi_br, obj.lambda, obj.lambda/2)' * Wx(:,n);
+                d_mu_array{3} = (A3 * a_rt * a_psi_rt) * ...
+                    (a_phi_rt' * ...          % d_mu_d_psi_rt
+                    obj.phi * a_phi_br) * ...
+                    (a_psi_br' * Wx(:,n));
                 
-                d_mu_array{4} = A3 * a_vec(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2) * ...
-                    compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, lambda, lambda/2)' * ...          % d_mu_d_phi_a
+                d_mu_array{4} = (A3 * a_psi_rt) * ...
+                    (a_phi_rt' * ...          % d_mu_d_phi_a
                     diag(a_rt_a) * ...
-                    obj.phi * compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2) * ...
-                    a_vec(obj, obj.Nt, psi_br, obj.lambda, obj.lambda/2)' * Wx(:,n);
+                    obj.phi * a_phi_br) * ...
+                    (a_psi_br' * Wx(:,n));
                 
-                d_mu_array{5} = A3 * a_vec(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2) * ...
-                    compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, lambda, lambda/2)' * ...          % d_mu_d_phi_e
+                d_mu_array{5} = (A3 * a_psi_rt) * ...
+                    (a_phi_rt' * ...          % d_mu_d_phi_e
                     diag(a_rt_e) * ...
-                    obj.phi * compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2) * ...
-                        a_vec(obj, obj.Nt, psi_br, obj.lambda, obj.lambda/2)' * Wx(:,n);
+                    obj.phi * a_phi_br)* ...
+                        (a_psi_br' * Wx(:,n));
                 
-                d_mu_array{6} = A4 * a_vec(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2) * a_bt' * ...   % d_mu_d_psi_br
-                    a_vec(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2)' * Wx(:,n);
+                d_mu_array{6} = (A4 * a_bt' * a_psi_bt) * ...   % d_mu_d_psi_br
+                    (a_psi_tb' * Wx(:,n));
             
-                d_mu_array{7} = A4 * a_tb * a_vec(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2) * ... 
-                    a_vec(obj, ob.Nt, psi_tb, obj.lambda, obj.lambda/2)' * ...   % d_mu_d_psi_bt
-                    Wx(:,n);
+                d_mu_array{7} = (A4 * a_tb * a_psi_bt) * ... 
+                    (a_psi_tb' * ...   % d_mu_d_psi_bt
+                    Wx(:,n));
                 
                 % Calculate Jacobian matrix elements
                 for i = 1:7
                     for j = 1:7
-                        J_zeta(i,j) = J_zeta(i,j) + ...
-                            real(d_mu_array{i}' * d_mu_array{j});
+
+                        J_zao(i,j) = J_zao(i,j) + real(d_mu_array{i}' * d_mu_array{j});
                     end
                 end
             end
+
+            % for n = 1:N
+            %     disp(['Iteration n = ' num2str(n)])
+            %     d_mu_array = cell(7, 1);
+                
+            %     % Row 1
+            %     disp('Row 1 calculations:')
+            %     temp1a = (A1 * a_psi_bt);
+            %     disp(['A1 * a_psi_bt: ' mat2str(size(temp1a))])
+            %     temp1b = (a_psi_tb' * Wx(:,n));
+            %     disp(['a_psi_tb'' * Wx(:,n): ' mat2str(size(temp1b))])
+            %     d_mu_array{1} = temp1a * temp1b;
+            %     disp(['d_mu_array{1}: ' mat2str(size(d_mu_array{1}))])
+                
+            %     % Row 2
+            %     disp('Row 2 calculations:')
+            %     temp2a = (A2 * a_psi_rt);
+            %     disp(['A2 * a_psi_rt: ' mat2str(size(temp2a))])
+            %     temp2b = (a_phi_rt' * obj.phi * a_phi_br);
+            %     disp(['a_phi_rt'' * obj.phi * a_phi_br: ' mat2str(size(temp2b))])
+            %     temp2c = (a_psi_br' * Wx(:,n));
+            %     disp(['a_psi_br'' * Wx(:,n): ' mat2str(size(temp2c))])
+            %     d_mu_array{2} = temp2a * temp2b * temp2c;
+            %     disp(['d_mu_array{2}: ' mat2str(size(d_mu_array{2}))])
+                
+            %     % Row 3
+            %     disp('Row 3 calculations:')
+            %     temp3a = (A3 * a_rt * a_psi_rt);
+            %     disp(['A3 * a_rt * a_psi_rt: ' mat2str(size(temp3a))])
+            %     temp3b = (a_phi_rt' * obj.phi * a_phi_br);
+            %     disp(['a_phi_rt'' * obj.phi * a_phi_br: ' mat2str(size(temp3b))])
+            %     temp3c = (a_psi_br' * Wx(:,n));
+            %     disp(['a_psi_br'' * Wx(:,n): ' mat2str(size(temp3c))])
+            %     d_mu_array{3} = temp3a * temp3b * temp3c;
+            %     disp(['d_mu_array{3}: ' mat2str(size(d_mu_array{3}))])
+                
+            %     % Row 4
+            %     disp('Row 4 calculations:')
+            %     temp4a = (A3 * a_psi_rt);
+            %     disp(['A3 * a_psi_rt: ' mat2str(size(temp4a))])
+            %     temp4b = (a_phi_rt' * diag(a_rt_a) * obj.phi * a_phi_br);
+            %     disp(['a_phi_rt'' * diag(a_rt_a) * obj.phi * a_phi_br: ' mat2str(size(temp4b))])
+            %     temp4c = (a_psi_br' * Wx(:,n));
+            %     disp(['a_psi_br'' * Wx(:,n): ' mat2str(size(temp4c))])
+            %     d_mu_array{4} = temp4a * temp4b * temp4c;
+            %     disp(['d_mu_array{4}: ' mat2str(size(d_mu_array{4}))])
+                
+            %     % Row 5
+            %     disp('Row 5 calculations:')
+            %     temp5a = (A3 * a_psi_rt);
+            %     disp(['A3 * a_psi_rt: ' mat2str(size(temp5a))])
+            %     temp5b = (a_phi_rt' * diag(a_rt_e) * obj.phi * a_phi_br);
+            %     disp(['a_phi_rt'' * diag(a_rt_e) * obj.phi * a_phi_br: ' mat2str(size(temp5b))])
+            %     temp5c = (a_psi_br' * Wx(:,n));
+            %     disp(['a_psi_br'' * Wx(:,n): ' mat2str(size(temp5c))])
+            %     d_mu_array{5} = temp5a * temp5b * temp5c;
+            %     disp(['d_mu_array{5}: ' mat2str(size(d_mu_array{5}))])
+                
+            %     % Row 6
+            %     disp('Row 6 calculations:')
+            %     disp(size(A4))
+            %     disp(size(a_psi_bt))
+            %     disp(size(a_bt'))
+            %     disp(size(a_psi_tb'))
+            %     disp(size(Wx(:,n)))
+            %     temp6a = (A4 * a_bt' * a_psi_bt);
+            %     disp(['A4 * a_psi_bt * a_bt'': ' mat2str(size(temp6a))])
+            %     temp6b = (a_psi_tb' * Wx(:,n));
+            %     disp(['psi_tb'' * Wx(:,n): ' mat2str(size(temp6b))])
+            %     d_mu_array{6} = temp6a * temp6b;
+            %     disp(['d_mu_array{6}: ' mat2str(size(d_mu_array{6}))])
+                
+            %     % Row 7
+            %     disp(size(A4))
+            %     disp(size(a_tb))
+            %     disp(size(a_psi_bt))
+            %     disp(size(a_psi_tb'))
+            %     disp(size(Wx(:,n)))
+            %     disp('Row 7 calculations:')
+            %     temp7a = (A4 * a_tb * a_psi_bt);
+            %     disp(['A4 * a_tb * psi_bt: ' mat2str(size(temp7a))])
+            %     temp7b = (a_psi_tb' * Wx(:,n));
+            %     disp(['psi_tb'' * Wx(:,n): ' mat2str(size(temp7b))])
+            %     d_mu_array{7} = temp7a * temp7b;
+            %     disp(['d_mu_array{7}: ' mat2str(size(d_mu_array{7}))])
+                
+            %     % Jacobian calculations
+            %     disp('Starting Jacobian calculations:')
+            %     for i = 1:7
+            %         for j = 1:7
+            %             temp_jac = d_mu_array{i}' * d_mu_array{j};
+            %             J_zao(i,j) = J_zao(i,j) + real(temp_jac);
+            %         end
+            %     end
+            % end
             
             % Apply scaling factor
-            J_zeta = (2 * Pb / (sigma^2)) * J_zeta;
+            J_zao = (2 * Pb / (sigma^2)) * J_zao;
             
-            % Verify the Jacobian matrix properties
-            if nargout > 1
-                verification = verifyJacobian(J_zeta);
-            end
+            % % Verify the Jacobian matrix properties
+            % if nargout > 1
+            %     verification = verifyJacobian(J_zao);
+            % end
         end
         
         function [psibt, psitb] = computeBSTargetAngles(obj)
