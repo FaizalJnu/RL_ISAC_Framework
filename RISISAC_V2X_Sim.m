@@ -10,12 +10,12 @@ classdef RISISAC_V2X_Sim < handle
         Nx = 8
         Ny = 8
         Mb = 64
-        rate
+        rate = 0
         c = 3e8;
         lambda = 3e8/28e9;
-        h_l;
-        h_nl;
-        gamma_c;
+        h_l = 0;
+        h_nl = 0;
+        gamma_c = 0;
 
         speed = 10
         end_x = 1000
@@ -25,7 +25,6 @@ classdef RISISAC_V2X_Sim < handle
         alpha_nl = 2.2            % RIS path loss exponent
         rho_l = 3               % Direct path shadow fading
         rho_nl = 4              % RIS path shadow fading
-        % rho_l = 
         
         % Locations (in meters)
         bs_loc = [900, 100, 20]   % Base station location
@@ -316,6 +315,13 @@ classdef RISISAC_V2X_Sim < handle
                 H_real, ... % Channel info real part
                 H_imag ... % Channel info imaginary part
             ];
+
+            % disp(['phi_real size: ' num2str(length(phi_real))]);
+            % disp(['phi_imag size: ' num2str(length(phi_imag))]);
+            % disp(['Rc size: ' num2str(length(Rc))]);
+            % disp(['H matrix size: ' num2str(size(H))]);
+            % disp(['H_real size: ' num2str(length(H_real))]);
+            % disp(['H_imag size: ' num2str(length(H_imag))]);
             
             % Ensure it's a row vector
             state = state(:)';
@@ -342,6 +348,8 @@ classdef RISISAC_V2X_Sim < handle
             
             % Get next state
             next_state = obj.getState();
+            % disp(['Next state size: ' num2str(size(next_state))]);
+            % disp("no, it is not");
             
             % Check if episode is done (based on maximum steps or achieved performance)
             % You might want to modify this condition based on your requirements
@@ -513,11 +521,6 @@ classdef RISISAC_V2X_Sim < handle
             if ~rate_constraint_satisfied
                 peb = peb * (1 + (R_min - obj.rate)/R_min);  % Penalty for rate constraint violation
             end
-
-            % if peb > 12
-            %     peb = rand(0,12);
-            % end
-            
             % Store additional metrics
             additionalMetrics = struct(...
                 'Distances', struct(...
@@ -1009,109 +1012,9 @@ classdef RISISAC_V2X_Sim < handle
                     end
                 end
             end
-
-            % for n = 1:N
-            %     disp(['Iteration n = ' num2str(n)])
-            %     d_mu_array = cell(7, 1);
-                
-            %     % Row 1
-            %     disp('Row 1 calculations:')
-            %     temp1a = (A1 * a_psi_bt);
-            %     disp(['A1 * a_psi_bt: ' mat2str(size(temp1a))])
-            %     temp1b = (a_psi_tb' * Wx(:,n));
-            %     disp(['a_psi_tb'' * Wx(:,n): ' mat2str(size(temp1b))])
-            %     d_mu_array{1} = temp1a * temp1b;
-            %     disp(['d_mu_array{1}: ' mat2str(size(d_mu_array{1}))])
-                
-            %     % Row 2
-            %     disp('Row 2 calculations:')
-            %     temp2a = (A2 * a_psi_rt);
-            %     disp(['A2 * a_psi_rt: ' mat2str(size(temp2a))])
-            %     temp2b = (a_phi_rt' * obj.phi * a_phi_br);
-            %     disp(['a_phi_rt'' * obj.phi * a_phi_br: ' mat2str(size(temp2b))])
-            %     temp2c = (a_psi_br' * Wx(:,n));
-            %     disp(['a_psi_br'' * Wx(:,n): ' mat2str(size(temp2c))])
-            %     d_mu_array{2} = temp2a * temp2b * temp2c;
-            %     disp(['d_mu_array{2}: ' mat2str(size(d_mu_array{2}))])
-                
-            %     % Row 3
-            %     disp('Row 3 calculations:')
-            %     temp3a = (A3 * a_rt * a_psi_rt);
-            %     disp(['A3 * a_rt * a_psi_rt: ' mat2str(size(temp3a))])
-            %     temp3b = (a_phi_rt' * obj.phi * a_phi_br);
-            %     disp(['a_phi_rt'' * obj.phi * a_phi_br: ' mat2str(size(temp3b))])
-            %     temp3c = (a_psi_br' * Wx(:,n));
-            %     disp(['a_psi_br'' * Wx(:,n): ' mat2str(size(temp3c))])
-            %     d_mu_array{3} = temp3a * temp3b * temp3c;
-            %     disp(['d_mu_array{3}: ' mat2str(size(d_mu_array{3}))])
-                
-            %     % Row 4
-            %     disp('Row 4 calculations:')
-            %     temp4a = (A3 * a_psi_rt);
-            %     disp(['A3 * a_psi_rt: ' mat2str(size(temp4a))])
-            %     temp4b = (a_phi_rt' * diag(a_rt_a) * obj.phi * a_phi_br);
-            %     disp(['a_phi_rt'' * diag(a_rt_a) * obj.phi * a_phi_br: ' mat2str(size(temp4b))])
-            %     temp4c = (a_psi_br' * Wx(:,n));
-            %     disp(['a_psi_br'' * Wx(:,n): ' mat2str(size(temp4c))])
-            %     d_mu_array{4} = temp4a * temp4b * temp4c;
-            %     disp(['d_mu_array{4}: ' mat2str(size(d_mu_array{4}))])
-                
-            %     % Row 5
-            %     disp('Row 5 calculations:')
-            %     temp5a = (A3 * a_psi_rt);
-            %     disp(['A3 * a_psi_rt: ' mat2str(size(temp5a))])
-            %     temp5b = (a_phi_rt' * diag(a_rt_e) * obj.phi * a_phi_br);
-            %     disp(['a_phi_rt'' * diag(a_rt_e) * obj.phi * a_phi_br: ' mat2str(size(temp5b))])
-            %     temp5c = (a_psi_br' * Wx(:,n));
-            %     disp(['a_psi_br'' * Wx(:,n): ' mat2str(size(temp5c))])
-            %     d_mu_array{5} = temp5a * temp5b * temp5c;
-            %     disp(['d_mu_array{5}: ' mat2str(size(d_mu_array{5}))])
-                
-            %     % Row 6
-            %     disp('Row 6 calculations:')
-            %     disp(size(A4))
-            %     disp(size(a_psi_bt))
-            %     disp(size(a_bt'))
-            %     disp(size(a_psi_tb'))
-            %     disp(size(Wx(:,n)))
-            %     temp6a = (A4 * a_bt' * a_psi_bt);
-            %     disp(['A4 * a_psi_bt * a_bt'': ' mat2str(size(temp6a))])
-            %     temp6b = (a_psi_tb' * Wx(:,n));
-            %     disp(['psi_tb'' * Wx(:,n): ' mat2str(size(temp6b))])
-            %     d_mu_array{6} = temp6a * temp6b;
-            %     disp(['d_mu_array{6}: ' mat2str(size(d_mu_array{6}))])
-                
-            %     % Row 7
-            %     disp(size(A4))
-            %     disp(size(a_tb))
-            %     disp(size(a_psi_bt))
-            %     disp(size(a_psi_tb'))
-            %     disp(size(Wx(:,n)))
-            %     disp('Row 7 calculations:')
-            %     temp7a = (A4 * a_tb * a_psi_bt);
-            %     disp(['A4 * a_tb * psi_bt: ' mat2str(size(temp7a))])
-            %     temp7b = (a_psi_tb' * Wx(:,n));
-            %     disp(['psi_tb'' * Wx(:,n): ' mat2str(size(temp7b))])
-            %     d_mu_array{7} = temp7a * temp7b;
-            %     disp(['d_mu_array{7}: ' mat2str(size(d_mu_array{7}))])
-                
-            %     % Jacobian calculations
-            %     disp('Starting Jacobian calculations:')
-            %     for i = 1:7
-            %         for j = 1:7
-            %             temp_jac = d_mu_array{i}' * d_mu_array{j};
-            %             J_zao(i,j) = J_zao(i,j) + real(temp_jac);
-            %         end
-            %     end
-            % end
-            
             % Apply scaling factor
             J_zao = (2 * Pb / (sigma^2)) * J_zao;
             
-            % % Verify the Jacobian matrix properties
-            % if nargout > 1
-            %     verification = verifyJacobian(J_zao);
-            % end
         end
         
         function [psibt, psitb] = computeBSTargetAngles(obj)

@@ -19,7 +19,7 @@ class RISISACTrainer:
         initial_state = self.eng.getState(self.sim)
         initial_state = np.array(initial_state).flatten()
         state_dim = len(initial_state)
-        action_dim = 64 + 2  # RIS phases (64) + throttle (1) + steering (1)
+        action_dim = 64  # RIS phases (64) + throttle (1) + steering (1)
         print(f"Initializing FLDDPG with state_dim={state_dim}, action_dim={action_dim}")
         
         # Initialize DDPG agent with improved parameters
@@ -138,6 +138,7 @@ class RISISACTrainer:
                 
                 # Convert and execute action
                 matlab_action = matlab.double(action.tolist())
+                
                 next_matlab_state, reward, done = self.eng.step(self.sim, matlab_action, nargout=3)
                 
                 # Process step results

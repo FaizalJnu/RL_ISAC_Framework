@@ -258,6 +258,10 @@ class ReplayBuffer:
         # Optional debugging to verify shapes
         # print(f"Pushing state shape: {state.shape}, next_state shape: {next_state.shape}")
         
+        # print(f"self.state_dim: {self.state_dim}")
+        # print(f"state shape: {state.shape}")
+        # print(f"next_state shape: {next_state.shape}")
+        
         # Ensure states are the correct dimension
         assert state.shape == (self.state_dim,), f"State shape mismatch: {state.shape}"
         assert next_state.shape == (self.state_dim,), f"Next state shape mismatch: {next_state.shape}"
@@ -272,8 +276,8 @@ class ReplayBuffer:
         state, action, reward, next_state = zip(*batch)
         
         # Normalize state shapes - ensure all states are 1D arrays of shape (138,)
-        state = np.array([np.squeeze(s) for s in state])  # Will convert (1,138) to (138,)
-        next_state = np.array([np.squeeze(ns) for ns in next_state])
+        state = np.array([np.squeeze(s) for s in state]) # Ensure each state is a 1D array
+        next_state = np.array([np.squeeze(ns) for ns in next_state]) # Ensure each next state is a 1D array
         
         action = np.array(action)
         reward = np.array(reward).reshape(-1, 1)
