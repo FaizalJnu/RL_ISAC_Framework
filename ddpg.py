@@ -297,7 +297,11 @@ class FLDDPG:
     def __init__(self, state_dim, action_dim, hidden_dims=[400, 300], buffer_size=10000,
                  batch_size=16, gamma=0.95, tau=0.00001, actor_lr=1e-3, critic_lr=1e-3,
                  lr_decay_rate=0.995, min_lr=1e-6):
-        self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        if(torch.backends.mps.is_available()):
+            self.device = torch.device("mps")
+        else:
+            self.device = torch.device("cuda")
+        # self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
         
         # Initialize networks using our implementations
         self.target_actor = TargetActorNetwork(
