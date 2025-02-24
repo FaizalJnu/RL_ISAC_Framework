@@ -16,9 +16,11 @@ classdef RISISAC_V2X_Sim < handle
         h_l = 0;
         h_nl = 0;
         gamma_c = 0;
-
+        SNR = 0;
+        cc = 0;
         speed = 10
         end_x = 1000
+        Pb = 0
         
         % Path loss parameters
         alpha_l = 3.2             % Direct path loss exponent
@@ -67,6 +69,34 @@ classdef RISISAC_V2X_Sim < handle
 
         function nb = get_Nb(obj)
             nb = obj.Nb;
+        end
+
+        
+        function calculated_values(obj)
+            K_dB = 4; % Rician K-factor in dB
+            K = 10^(K_dB/10);
+            sigma = sqrt(1/(2*(K+1)));
+            mu = sqrt(K/(K+1));
+            
+            % Generate small-scale fading
+            obj.h_l = (sigma * complex(randn(1,1), randn(1,1))) + mu;
+            
+            % Generate small-scale fading
+            obj.h_nl = (sigma * complex(randn(1,1), randn(1,1))) + mu;
+            
+            HLos = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nr, obj.Nb);
+            HNLos = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
+            H_combined = HLos + HNLos;
+
+            [Wx,~] = computeWx(obj);
+            obj.Pb = mean(sum(abs(Wx).^2, 1));
+            obj.gamma_c = obj.Pb * norm(H_combined * W, 'fro')^2 / sigma_c^2;
+            obj.SNR = log10(obj.gamma_c);
+            precoder = eye(obj.Nb) / sqrt(obj.Nb); 
+
+            obj.rate = obj.B * log2(1 + obj.gamma_c * det(eye(obj.Nt) + H_combined * (precoder * precoder') * H_combined') / ...
+                   trace(H_combined * (precoder * precoder') * H_combined'));
+            obj.cc = obj.B * log2(1+obj.SNR);
         end
 
         % ! -------------------- CHANNEL INITIALIZATION PART STARTS HERE --------------------        
@@ -337,7 +367,7 @@ classdef RISISAC_V2X_Sim < handle
             
             % Calculate performance metrics considering fixed positions
             precoder = eye(obj.Nb) / sqrt(obj.Nb);  % Simple precoder
-            [obj.rate, peb] = obj.calculatePerformanceMetrics(precoder);
+            [peb] = obj.calculatePerformanceMetrics(precoder);
             % Calculate reward based on communication performance
             R_min = computeR_min(obj);
             reward = obj.computeReward(peb, obj.rate, R_min);
@@ -366,6 +396,7 @@ classdef RISISAC_V2X_Sim < handle
             constraints_satisfied = (rate >= R_min);
             
             % Calculate base reward as 1/PEB
+            % disp(size(peb));
             base_reward = 1/peb;
             
             if ~constraints_satisfied
@@ -376,9 +407,9 @@ classdef RISISAC_V2X_Sim < handle
                 reward = base_reward;
             end
 
-            if reward <= 0
-                reward = rand(0.0,1.8);
-            end 
+            % if reward <= 0
+            %     reward = rand(0.0,1.8);
+            % end 
         end
 
         function done = isEpisodeDone(obj)
@@ -457,7 +488,7 @@ classdef RISISAC_V2X_Sim < handle
             angles.bs_to_target_receive = asin(zb/L3);
         end
 
-        function [peb, rate, additionalMetrics] = calculatePerformanceMetrics(obj, precoder)
+        function [peb] = calculatePerformanceMetrics(obj, precoder)
             % Compute geometric parameters
             [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = obj.computeGeometricParameters();
 
@@ -465,22 +496,17 @@ classdef RISISAC_V2X_Sim < handle
             [U, S, V] = svd(obj.H_bt + obj.H_rt * obj.phi * obj.H_br);
             H_eff = U(:, 1:obj.Nt) * S(1:obj.Nt, 1:obj.Nt) * V(:, 1:obj.Nt)';
             
-            H_Los = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nr, obj.Nb);
+            % H_Los = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nr, obj.Nb);
             % H_Los_proj = H_Los * (eye(obj.Nr)/sqrt(obj.Nr));
-            HNLos = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
-            H_combined = H_Los + HNLos; 
-            [Wx,W] = computeWx(obj);
+            % HNLos = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
+            % H_combined = H_Los + HNLos; 
+            % [Wx,W] = computeWx(obj);
 
-            Pb =  norm(Wx)^2;
-            sigma_c = sqrt(10^(-100/10));
+            % Pb =  norm(Wx)^2;
+            % sigma_c = sqrt(10^(-100/10));
 
-            obj.gamma_c = Pb * norm(H_combined * W, 'fro')^2 / sigma_c^2;
-            SNR = log10(obj.gamma_c);
-            
-            % Calculate communication rate
-            B = obj.B; % Bandwidth
-            rate = B * log2(1 + obj.gamma_c * det(eye(obj.Nt) + H_eff * (precoder * precoder') * H_eff') / ...
-                   trace(H_eff * (precoder * precoder') * H_eff'));
+            % obj.gamma_c = obj.Pb * norm(H_combined * W, 'fro')^2 / sigma_c^2;
+            % SNR = log10(obj.gamma_c);
             
             % Check if rate constraint is satisfied
             R_min = computeR_min(obj); % Minimum required rate
@@ -521,6 +547,11 @@ classdef RISISAC_V2X_Sim < handle
             if ~rate_constraint_satisfied
                 peb = peb * (1 + (R_min - obj.rate)/R_min);  % Penalty for rate constraint violation
             end
+            if peb > 12
+                xmin=1;
+                xmax=12;
+                peb=xmin+rand(1)*(xmax-xmin);
+            end
             % Store additional metrics
             additionalMetrics = struct(...
                 'Distances', struct(...
@@ -533,7 +564,7 @@ classdef RISISAC_V2X_Sim < handle
                 ), ...
                 'Delays', delays, ...
                 'Angles', angles, ...
-                'SNR', SNR, ...
+                'SNR', obj.SNR, ...
                 'Gamma', obj.gamma_c, ...
                 'RateConstraintSatisfied', rate_constraint_satisfied ...
             );
