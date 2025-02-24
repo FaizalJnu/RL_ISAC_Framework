@@ -13,6 +13,9 @@ classdef RISISAC_V2X_Sim < handle
         rate = 0
         c = 3e8;
         lambda = 3e8/28e9;
+        sigma_c = sqrt(6.31 * 10^-13);
+
+
         h_l = 0;
         h_nl = 0;
         gamma_c = 0;
@@ -90,7 +93,7 @@ classdef RISISAC_V2X_Sim < handle
 
             [Wx,~] = computeWx(obj);
             obj.Pb = mean(sum(abs(Wx).^2, 1));
-            obj.gamma_c = obj.Pb * norm(H_combined * W, 'fro')^2 / sigma_c^2;
+            obj.gamma_c = obj.Pb * norm(H_combined * W, 'fro')^2 / obj.sigma_c^2;
             obj.SNR = log10(obj.gamma_c);
             precoder = eye(obj.Nb) / sqrt(obj.Nb); 
 
