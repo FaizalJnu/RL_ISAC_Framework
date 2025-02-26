@@ -255,13 +255,6 @@ class ReplayBuffer:
         state = np.squeeze(np.array(state))
         next_state = np.squeeze(np.array(next_state))
         
-        # Optional debugging to verify shapes
-        # print(f"Pushing state shape: {state.shape}, next_state shape: {next_state.shape}")
-        
-        # print(f"self.state_dim: {self.state_dim}")
-        # print(f"state shape: {state.shape}")
-        # print(f"next_state shape: {next_state.shape}")
-        
         # Ensure states are the correct dimension
         assert state.shape == (self.state_dim,), f"State shape mismatch: {state.shape}"
         assert next_state.shape == (self.state_dim,), f"Next state shape mismatch: {next_state.shape}"
@@ -274,8 +267,7 @@ class ReplayBuffer:
     def sample(self, batch_size):
         batch = random.sample(self.buffer, batch_size)
         state, action, reward, next_state = zip(*batch)
-        
-        # Normalize state shapes - ensure all states are 1D arrays of shape (138,)
+
         state = np.array([np.squeeze(s) for s in state]) # Ensure each state is a 1D array
         next_state = np.array([np.squeeze(ns) for ns in next_state]) # Ensure each next state is a 1D array
         
@@ -334,7 +326,7 @@ class FLDDPG:
         self.replay_buffer = ReplayBuffer(buffer_size, state_dim)
         
         # Exploration parameters
-        self.epsilon = 0.1  # Using epsilon from our actor network implementation
+        self.epsilon = 0.5  # Using epsilon from our actor network implementation
         self.epsilon_decay = 0.995
         self.min_epsilon = 0.01
 
@@ -382,7 +374,7 @@ class FLDDPG:
     def update(self):
         """Update the networks using experience replay"""
         if len(self.replay_buffer) < self.batch_size * 3:
-            return 0, 0  # Return losses for monitoring
+            return 0, 0
         
         # Sample from replay buffer
         state_batch, action_batch, reward_batch, next_state_batch = self.replay_buffer.sample(self.batch_size)

@@ -371,6 +371,8 @@ classdef RISISAC_V2X_Sim < handle
             % Calculate performance metrics considering fixed positions
             precoder = eye(obj.Nb) / sqrt(obj.Nb);  % Simple precoder
             [peb] = obj.calculatePerformanceMetrics(precoder);
+            % peb_min = 1;
+            % peb_max = 
             % Calculate reward based on communication performance
             R_min = computeR_min(obj);
             reward = obj.computeReward(peb, obj.rate, R_min);
@@ -499,18 +501,6 @@ classdef RISISAC_V2X_Sim < handle
             [U, S, V] = svd(obj.H_bt + obj.H_rt * obj.phi * obj.H_br);
             H_eff = U(:, 1:obj.Nt) * S(1:obj.Nt, 1:obj.Nt) * V(:, 1:obj.Nt)';
             
-            % H_Los = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nr, obj.Nb);
-            % H_Los_proj = H_Los * (eye(obj.Nr)/sqrt(obj.Nr));
-            % HNLos = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
-            % H_combined = H_Los + HNLos; 
-            % [Wx,W] = computeWx(obj);
-
-            % Pb =  norm(Wx)^2;
-            % sigma_c = sqrt(10^(-100/10));
-
-            % obj.gamma_c = obj.Pb * norm(H_combined * W, 'fro')^2 / sigma_c^2;
-            % SNR = log10(obj.gamma_c);
-            
             % Check if rate constraint is satisfied
             R_min = computeR_min(obj); % Minimum required rate
             rate_constraint_satisfied = (obj.rate >= R_min);
@@ -545,16 +535,20 @@ classdef RISISAC_V2X_Sim < handle
             weighted_pos_CRLB = diag(weights) * pos_CRLB * diag(weights);
 
             % Calculate final PEB
-            peb = sqrt(trace(weighted_pos_CRLB));
+            peb = sqrt(trace(CRLB));
             % Optionally scale PEB based on rate constraint satisfaction
             if ~rate_constraint_satisfied
+                disp("are we reaching here?")
                 peb = peb * (1 + (R_min - obj.rate)/R_min);  % Penalty for rate constraint violation
             end
-            if peb > 12
-                xmin=1;
-                xmax=12;
-                peb=xmin+rand(1)*(xmax-xmin);
-            end
+
+            % Scale PEB to be between 0-12 meters
+            initial_max_peb = 150000; % Set based on your observed values
+            peb_scaled = 12 * (peb / initial_max_peb);
+            peb_scaled = max(0, min(12, peb_scaled));
+
+            peb = peb_scaled;
+
             % Store additional metrics
             additionalMetrics = struct(...
                 'Distances', struct(...
@@ -933,14 +927,14 @@ classdef RISISAC_V2X_Sim < handle
 
             % Calculate A3 and A4 for each n
             for n = 1:N
-                A3(:,n) = gamma_nl * h_nl * B * (n/N) * exp(1j * 2 * pi * B * delays.non_line_of_sight);
-                A4(:,n) = gamma_l * h_l * B * (n/N) * exp(1j * 2 * pi * B * delays.line_of_sight);
+                A3(:,n) = gamma_nl * h_nl * exp(1j * 2 * pi * B * (n/N) * delays.non_line_of_sight);
+                A4(:,n) = gamma_l * h_l * exp(1j * 2 * pi * B * (n/N) * delays.line_of_sight);
             end
 
             % Calculate A1 and A2 for each n
             for n = 1:N
-                A1(:,n) = gamma_l * h_l * 1j * 2 * pi * B * (n/N) * exp(1j * 2 * pi * B * delays.line_of_sight);
-                A2(:,n) = gamma_nl * h_nl * 1j * 2 * pi * B * (n/N) * exp(1j * 2 * pi * B * delays.non_line_of_sight);
+                A1(:,n) = gamma_l * h_l * 1j * 2 * pi * exp(1j * 2 * pi * B * (n/N) * delays.line_of_sight);
+                A2(:,n) = gamma_nl * h_nl * 1j * 2 * pi * exp(1j * 2 * pi * B * (n/N) * delays.non_line_of_sight);
             end
         end 
 
