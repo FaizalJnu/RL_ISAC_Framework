@@ -35,9 +35,15 @@ classdef RISISAC_V2X_Sim < handle
         bs_loc = [900, 100, 20]   % Base station location
         ris_loc = [200, 300, 40]  % RIS location
         target_loc = [500, 500, 0]% Target location
+
+        stepCount = 0;
+        maxSteps = 10000;
         
+        car_loc = target_loc;
         % Environment dimensions
         env_dims = [1000, 1000]   % Environment dimensions
+        destination = [randi([0, simulation_bounds(1)]), randi([0, simulation_bounds(2)]), 0];
+        time = 0;
         
         % Channel matrices
         H_bt      % Direct channel
@@ -279,49 +285,7 @@ classdef RISISAC_V2X_Sim < handle
 
         % ! -------------------- CHANNEL INITIALIZATION PART ENDS HERE --------------------        
         
-        % ! -------------------- MACHINE LEARNING PART STARTS HERE --------------------
-        function updateVehicleDynamics(obj, throttle, steering_angle)
-            % Constrain inputs
-            throttle = max(min(throttle, 1), -1);  % Normalize between -1 and 1
-            steering_angle = max(min(steering_angle, obj.vehicle.max_steering_angle), ...
-                               -obj.vehicle.max_steering_angle);
-            
-            % Calculate acceleration based on throttle
-            if throttle >= 0
-                target_accel = throttle * obj.vehicle.max_acceleration;
-            else
-                target_accel = throttle * abs(obj.vehicle.max_deceleration);
-            end
-            
-            % Update heading based on steering angle and velocity
-            speed = norm(obj.vehicle.velocity(1:2));
-            if speed > 0.1  % Only update heading when moving
-                turning_radius = obj.vehicle.wheelbase / tan(steering_angle);
-                angular_velocity = speed / turning_radius;
-                obj.vehicle.heading = obj.vehicle.heading + angular_velocity * obj.dt;
-                % Normalize heading to [-pi, pi]
-                obj.vehicle.heading = mod(obj.vehicle.heading + pi, 2*pi) - pi;
-            end
-            
-            % Update acceleration, velocity, and position
-            % Decompose acceleration into x and y components based on heading
-            obj.vehicle.acceleration(1) = target_accel * cos(obj.vehicle.heading);
-            obj.vehicle.acceleration(2) = target_accel * sin(obj.vehicle.heading);
-            
-            % Update velocity using acceleration
-            new_velocity = obj.vehicle.velocity + obj.vehicle.acceleration * obj.dt;
-            
-            % Constrain speed to maximum
-            current_speed = norm(new_velocity(1:2));
-            if current_speed > obj.vehicle.max_speed
-                new_velocity(1:2) = new_velocity(1:2) * obj.vehicle.max_speed / current_speed;
-            end
-            obj.vehicle.velocity = new_velocity;
-            
-            % Update position
-            obj.vehicle.position = obj.vehicle.position + obj.vehicle.velocity * obj.dt;
-        end
-        
+        % ! -------------------- MACHINE LEARNING PART STARTS HERE --------------------        
         function state = getState(obj)
             % Construct the state vector for the RL agent as described in the research.
             % State: [Phase shift info (phi), Communication rate (Rc), Channel info (H)]
@@ -358,17 +322,71 @@ classdef RISISAC_V2X_Sim < handle
 
         end
         
-        function [next_state, reward, done] = step(obj, action)
-            % Parse action vector - only for RIS phase shifts
-            % Assuming action is a vector of phase shifts for each RIS element
+        % function [next_state, reward, done] = step(obj, action)
+        %     % Parse action vector - only for RIS phase shifts
+        %     % Assuming action is a vector of phase shifts for each RIS element
+        %     ris_phases = action(1:obj.Nr); 
+            
+        %     % Update RIS phase shifts (normalized between 0 and 2π)
+        %     obj.phi = diag(exp(1j * 2 * pi * ris_phases));
+            
+        %     % Calculate performance metrics considering fixed positions
+        %     % precoder = eye(obj.Nb) / sqrt(obj.Nb);  % Simple precoder
+        %     [Wx,W] = computeWx(obj);
+        %     covar_matrix = W * W';
+        %     [peb] = obj.calculatePerformanceMetrics(covar_matrix);
+        %     % peb_min = 1;
+        %     % peb_max = 
+        %     % Calculate reward based on communication performance
+        %     R_min = computeR_min(obj);
+        %     % disp(['R_min: ' num2str(R_min)]);
+        %     reward = obj.computeReward(peb, obj.rate, R_min);
+
+        %     % if reward<=0
+        %     %     reward = rand(0.0,1.8);
+        %     % end
+            
+        %     % Get next state
+        %     next_state = obj.getState();
+        %     % disp(['Next state size: ' num2str(size(next_state))]);
+        %     % disp("no, it is not");
+            
+        %     % Check if episode is done (based on maximum steps or achieved performance)
+        %     % You might want to modify this condition based on your requirements
+        %     done = obj.isEpisodeDone();
+        % end
+
+        function [next_state, reward, done] = step(obj,action)
+            % Check if episode has already terminated (e.g., out of bounds or reached destination)
             ris_phases = action(1:obj.Nr); 
-            
-            % Update RIS phase shifts (normalized between 0 and 2π)
             obj.phi = diag(exp(1j * 2 * pi * ris_phases));
+            if isEpisodeDone(obj) || obj.stepCount >= obj.maxSteps
+                done = true;
+                next_state = getState(obj);
+                reward = computeReward(obj);
+                % info = struct();
+                return;
+            end
+        
+            % Update the vehicle's position for one time step:
+            direction = (obj.destination - obj.car_loc) / norm(obj.destination - obj.car_loc);
+            obj.car_loc = obj.car_loc + direction * obj.speed * obj.dt;
+            obj.time = obj.time + obj.dt;
             
-            % Calculate performance metrics considering fixed positions
-            % precoder = eye(obj.Nb) / sqrt(obj.Nb);  % Simple precoder
-            [Wx,W] = computeWx(obj);
+            % Update the target location (if the car is the dynamic target)
+            obj.target_loc = obj.car_loc;
+            
+            % Recompute geometric parameters based on the new positions
+            [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj);
+            
+            % Increase the step counter (helps enforce the max step limit per episode)
+            obj.stepCount = obj.stepCount + 1;
+            
+            % Get the new state (this could be the car's position plus other sensor/angle information)
+            next_state = getState(obj);  % Define getState(obj) to return your observation vector
+            
+            % Compute reward (for example, negative distance to destination or other criteria)
+            [~,W] = computeWx(obj);
             covar_matrix = W * W';
             [peb] = obj.calculatePerformanceMetrics(covar_matrix);
             % peb_min = 1;
@@ -376,21 +394,15 @@ classdef RISISAC_V2X_Sim < handle
             % Calculate reward based on communication performance
             R_min = computeR_min(obj);
             % disp(['R_min: ' num2str(R_min)]);
-            reward = obj.computeReward(peb, obj.rate, R_min);
-
-            % if reward<=0
-            %     reward = rand(0.0,1.8);
-            % end
+            reward = obj.computeReward(peb, obj.rate, R_min);  % Define computeReward(obj) according to your task
             
-            % Get next state
-            next_state = obj.getState();
-            % disp(['Next state size: ' num2str(size(next_state))]);
-            % disp("no, it is not");
+            % Check if the episode should be terminated (destination reached, out-of-bounds, or max steps reached)
+            done = isEpisodeDone(obj) || (obj.stepCount >= obj.maxSteps);
             
-            % Check if episode is done (based on maximum steps or achieved performance)
-            % You might want to modify this condition based on your requirements
-            done = obj.isEpisodeDone();
+            % Package additional info (like delays and angles)
+            % info = struct('delays', delays, 'angles', angles);
         end
+        
 
         function reward = computeReward(obj, peb, rate, R_min)
             % Compute reward based on (1/PEB) with constraint penalty
@@ -419,12 +431,20 @@ classdef RISISAC_V2X_Sim < handle
         end
 
         function done = isEpisodeDone(obj)
+            % Check if vehicle has reached the destination
+            epsilon = 1.0; % Acceptable error margin in meters
+            reached_dest = norm(obj.car_loc - obj.destination) < epsilon;
+            
             % Check if vehicle is out of bounds
-            pos = obj.vehicle.position;
-            done = any(pos(1:2) < 0) || ...
-                   pos(1) > obj.env_dims(1) || ...
-                   pos(2) > obj.env_dims(2);
+            pos = obj.car_loc;
+            out_of_bounds = any(pos(1:2) < 0) || ...
+                            pos(1) > obj.env_dims(1) || ...
+                            pos(2) > obj.env_dims(2);
+            
+            % Episode ends if the vehicle reaches its destination or goes out of bounds
+            done = reached_dest || out_of_bounds;
         end
+        
         
         function state = reset(obj)
             % Reset simulation state
@@ -442,7 +462,27 @@ classdef RISISAC_V2X_Sim < handle
         end
         % ! -------------------- MACHINE LEARNING PART ENDS HERE --------------------
 
-        % ! -------------------- PEB COMPUTATION PART STARTS HERE --------------------        
+        % ! -------------------- PEB COMPUTATION PART STARTS HERE --------------------
+        
+        % function updateVehicleDynamics(obj)
+        %     % Constrain inputs
+        %     while norm(obj.car_loc - obj.destination) > obj.speed * obj.dt
+        %         % Move towards destination
+        %         direction = (obj.destination - obj.car_loc) / norm(obj.destination - obj.car_loc);
+        %         obj.car_loc = obj.car_loc + direction * obj.speed * obj.dt;
+        %         obj.time = obj.time + obj.dt;
+        
+        %         % Update target location dynamically
+        %         obj.target_loc = obj.car_loc;  % Treat car as a dynamic target
+        
+        %         % Compute new geometric parameters
+        %         [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj);
+        
+        %         % Pause for visualization (optional)
+        %         pause(0.1);
+        %     end
+        % end
+        
 
         function [R_min] = computeR_min(obj)
             % Shannon capacity formula for baseline
@@ -888,14 +928,14 @@ classdef RISISAC_V2X_Sim < handle
             [~, ~, ~, ~, ~, ~, delays, angles] = computeGeometricParameters(obj);
             
             % Estimated parameter vector
-            zeta = [
-                delays.line_of_sight; 
-                delays.non_line_of_sight; 
-                angles.ris_to_target.aoa; 
-                angles.ris_to_target.azimuth; 
-                angles.ris_to_target.elevation_angle; 
-                computeBSTargetAngles(obj)
-            ];
+            % zeta = [
+            %     delays.line_of_sight; 
+            %     delays.non_line_of_sight; 
+            %     angles.ris_to_target.aoa; 
+            %     angles.ris_to_target.azimuth; 
+            %     angles.ris_to_target.elevation_angle; 
+            %     computeBSTargetAngles(obj)
+            % ];
             [T, dParams] = computeTransformationMatrix(obj);
             Nb = obj.Nb;
             Nt = obj.Nt;
@@ -1035,14 +1075,14 @@ classdef RISISAC_V2X_Sim < handle
             
         end
         
-        function [psibt, psitb] = computeBSTargetAngles(obj)
-            % Compute BS-target transmitting and receiving angles
-            L3 = norm(obj.bs_loc - obj.target_loc);
-            zb = obj.bs_loc(3);
+        % function [psibt, psitb] = computeBSTargetAngles(obj)
+        %     % Compute BS-target transmitting and receiving angles
+        %     L3 = norm(obj.bs_loc - obj.target_loc);
+        %     zb = obj.bs_loc(3);
             
-            psibt = acos(zb / L3);
-            psitb = asin(zb / L3);
-        end
+        %     psibt = acos(zb / L3);
+        %     psitb = asin(zb / L3);
+        % end
 
         % ! -------------------- PEB COMPUTATION PART ENDS HERE --------------------        
 
