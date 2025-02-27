@@ -68,6 +68,7 @@ classdef RISISAC_V2X_Sim < handle
         function obj = RISISAC_V2X_Sim()
             % Initialize channels
             obj.initializeChannels();
+            obj.calculated_values();
         end
 
         function nb = get_Nb(obj)
@@ -90,18 +91,33 @@ classdef RISISAC_V2X_Sim < handle
             HLos = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nr, obj.Nb);
             HNLos = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
             H_combined = HLos + HNLos;
+            disp(['H_combined size: ' num2str(size(H_combined))]);
 
-            [Wx,~] = computeWx(obj);
+            [Wx,W] = computeWx(obj);
             obj.Pb = mean(sum(abs(Wx).^2, 1));
+            % disp(['Pb: ' num2str(obj.Pb)]);
             obj.gamma_c = obj.Pb * norm(H_combined * W, 'fro')^2 / obj.sigma_c^2;
+            % disp(['gamma_c: ' num2str(obj.gamma_c)]);
             obj.SNR = log10(obj.gamma_c);
-            precoder = eye(obj.Nb) / sqrt(obj.Nb); 
+            % precoder = eye(obj.Nb) / sqrt(obj.Nb); 
 
-            obj.rate = obj.B * log2(1 + obj.gamma_c * det(eye(obj.Nt) + H_combined * (precoder * precoder') * H_combined') / ...
-                   trace(H_combined * (precoder * precoder') * H_combined'));
+            covariance_matrix = W * W';
+
+            obj.rate = obj.B * log2(1 + obj.gamma_c * det(eye(obj.Nt) + H_combined * covariance_matrix * H_combined') / ...
+            trace(H_combined * covariance_matrix * H_combined'));
+
+            % obj.rate = obj.B * log2(1 + obj.gamma_c * det(eye(obj.Nt) + H_combined * (precoder * precoder') * H_combined') / ...
+            %        trace(H_combined * (precoder * precoder') * H_combined'));
             obj.cc = obj.B * log2(1+obj.SNR);
         end
-
+        function printarr(obj, arr)
+            for i = 1:length(arr)
+                for j = 1:length(arr{i})
+                    fprintf('%f ', arr{i}(j));
+                end
+                fprintf('\n');
+            end
+        end
         % ! -------------------- CHANNEL INITIALIZATION PART STARTS HERE --------------------        
         function initializeChannels(obj)
             Nr = obj.Nr;
@@ -369,12 +385,15 @@ classdef RISISAC_V2X_Sim < handle
             obj.phi = diag(exp(1j * 2 * pi * ris_phases));
             
             % Calculate performance metrics considering fixed positions
-            precoder = eye(obj.Nb) / sqrt(obj.Nb);  % Simple precoder
-            [peb] = obj.calculatePerformanceMetrics(precoder);
+            % precoder = eye(obj.Nb) / sqrt(obj.Nb);  % Simple precoder
+            [Wx,W] = computeWx(obj);
+            covar_matrix = W * W';
+            [peb] = obj.calculatePerformanceMetrics(covar_matrix);
             % peb_min = 1;
             % peb_max = 
             % Calculate reward based on communication performance
             R_min = computeR_min(obj);
+            % disp(['R_min: ' num2str(R_min)]);
             reward = obj.computeReward(peb, obj.rate, R_min);
 
             % if reward<=0
@@ -444,9 +463,8 @@ classdef RISISAC_V2X_Sim < handle
         % ! -------------------- PEB COMPUTATION PART STARTS HERE --------------------        
 
         function [R_min] = computeR_min(obj)
-            B = obj.B;
             % Shannon capacity formula for baseline
-            R_theoretical = B * log2(1 + obj.gamma_c);
+            R_theoretical = obj.B * log2(1 + obj.gamma_c);
 
             % Set R_min as a fraction of theoretical maximum
             R_min = 0.5 * R_theoretical;
@@ -855,17 +873,6 @@ classdef RISISAC_V2X_Sim < handle
             end
         end
         
-        % transmit signal vector from beamforming matrix calculation
-        % function [Wx, W] = computeWx(obj)
-        %     Nb = obj.Nb; % Number of base stations
-        %     Mb = obj.Mb; % Number of beams
-        %     W = rand(Nb, Mb) + 1j*randn(Nb, Mb); 
-        %     W = W ./ vecnorm(W); % Normalized vector presentation
-            
-        %     x = randn(Mb, 1) + 1j*randn(Mb, 1); 
-        %     Wx = W*x;
-        % end     
-        
         function [Wx, W] = computeWx(obj)
             Nb = obj.Nb;  % Number of base stations
             Mb = obj.Mb;  % Number of beams
@@ -909,7 +916,7 @@ classdef RISISAC_V2X_Sim < handle
             [T, dParams] = computeTransformationMatrix(obj);
             Nb = obj.Nb;
             Nt = obj.Nt;
-            Wx = computeWx(obj);
+            [Wx,~] = computeWx(obj);
             gamma_l = sqrt(Nb*Nt)/sqrt(obj.rho_l);
             gamma_nl = sqrt(Nb*Nt)/sqrt(obj.rho_nl);
             
