@@ -123,6 +123,8 @@ class RISISACTrainer:
             # Reset environment
             matlab_state = self.eng.reset(self.sim)
             state = self.process_state(matlab_state)
+            # print("State dtype:", matlab_state.dtype)
+            # print("Contains complex values?", np.iscomplexobj(matlab_state))
             episode_reward = 0
             episode_losses = {'actor': [], 'critic': []}
             

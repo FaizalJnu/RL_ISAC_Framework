@@ -91,12 +91,13 @@ classdef RISISAC_V2X_Sim < handle
             HLos = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nr, obj.Nb);
             HNLos = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
             H_combined = HLos + HNLos;
-            disp(['H_combined size: ' num2str(size(H_combined))]);
 
             [Wx,W] = computeWx(obj);
+            % disp(W);
             obj.Pb = mean(sum(abs(Wx).^2, 1));
             % disp(['Pb: ' num2str(obj.Pb)]);
-            obj.gamma_c = obj.Pb * norm(H_combined * W, 'fro')^2 / obj.sigma_c^2;
+            gamma_c = obj.Pb * norm(H_combined * W, 'fro')^2 / obj.sigma_c^2;
+            obj.gamma_c = gamma_c / 1e8;
             % disp(['gamma_c: ' num2str(obj.gamma_c)]);
             obj.SNR = log10(obj.gamma_c);
             % precoder = eye(obj.Nb) / sqrt(obj.Nb); 
@@ -105,18 +106,7 @@ classdef RISISAC_V2X_Sim < handle
 
             obj.rate = obj.B * log2(1 + obj.gamma_c * det(eye(obj.Nt) + H_combined * covariance_matrix * H_combined') / ...
             trace(H_combined * covariance_matrix * H_combined'));
-
-            % obj.rate = obj.B * log2(1 + obj.gamma_c * det(eye(obj.Nt) + H_combined * (precoder * precoder') * H_combined') / ...
-            %        trace(H_combined * (precoder * precoder') * H_combined'));
             obj.cc = obj.B * log2(1+obj.SNR);
-        end
-        function printarr(obj, arr)
-            for i = 1:length(arr)
-                for j = 1:length(arr{i})
-                    fprintf('%f ', arr{i}(j));
-                end
-                fprintf('\n');
-            end
         end
         % ! -------------------- CHANNEL INITIALIZATION PART STARTS HERE --------------------        
         function initializeChannels(obj)
@@ -232,17 +222,14 @@ classdef RISISAC_V2X_Sim < handle
             % Calculate gamma_l
             gamma_l = sqrt(Nb*Nt)/sqrt(obj.rho_l);
             
-            % System parameters
-            B = 20e6; % Bandwidth (20 MHz)
-            N = 2048; % FFT size
             [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters(obj);
             tau_l = delays.line_of_sight;
             
             % Generate H_Los for all subcarriers with correct dimensions Nt × Nb
-            H_Los_3d = zeros(Nt, Nb, N);
+            H_Los_3d = zeros(Nt, Nb, obj.Ns);
             
-            for n = 1:N
-                phase = exp(1j*2*pi*B*(n-1)*tau_l/N);
+            for n = 1:obj.Ns
+                phase = exp(1j*2*pi*obj.B*(n-1)*tau_l/obj.Ns);
                 H_Los_3d(:,:,n) = gamma_l * obj.h_l * H_bt * phase;  
             end
             
@@ -267,9 +254,6 @@ classdef RISISAC_V2X_Sim < handle
             % Calculate gamma_nl
             gamma_nl = sqrt(Nb*Nr)/sqrt(rho_nl);
             
-            % System parameters
-            B = 20e6; % Bandwidth (20 MHz)
-            N = 2048; % FFT size
             [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters(obj);
             tau_nl = delays.non_line_of_sight;
             
@@ -280,10 +264,10 @@ classdef RISISAC_V2X_Sim < handle
             obj.phi = diag(u);
             
             % Generate H_NLoS for all subcarriers
-            H_NLoS_3d = zeros(Nt, Nb, N);
+            H_NLoS_3d = zeros(Nt, Nb, obj.Ns);
             
-            for n = 1:N
-                phase = exp(1j*2*pi*B*(n-1)*tau_nl/N);
+            for n = 1:obj.Ns
+                phase = exp(1j*2*pi*obj.B*(n-1)*tau_nl/obj.Ns);
                 % H_rt(Nt×Nr) * phi(Nr×Nr) * H_br(Nr×Nb)
                 H_NLoS_3d(:,:,n) = gamma_nl * obj.h_nl * H_rt * obj.phi * H_br * phase;
             end
@@ -364,16 +348,14 @@ classdef RISISAC_V2X_Sim < handle
                 H_real, ... % Channel info real part
                 H_imag ... % Channel info imaginary part
             ];
-
-            % disp(['phi_real size: ' num2str(length(phi_real))]);
-            % disp(['phi_imag size: ' num2str(length(phi_imag))]);
-            % disp(['Rc size: ' num2str(length(Rc))]);
-            % disp(['H matrix size: ' num2str(size(H))]);
-            % disp(['H_real size: ' num2str(length(H_real))]);
-            % disp(['H_imag size: ' num2str(length(H_imag))]);
             
             % Ensure it's a row vector
+            % disp('Max imaginary part in state:'), max(abs(imag(state(:))))
+            state = real(state);
             state = state(:)';
+            % disp('State class: '), class(state)
+            % disp('Max imaginary part: '), max(abs(imag(state(:))))
+
         end
         
         function [next_state, reward, done] = step(obj, action)
@@ -528,29 +510,30 @@ classdef RISISAC_V2X_Sim < handle
              
             % Minimize PEB by optimizing the inverse of FIM (CRLB)
             % First, ensure J is well-conditioned
-            epsilon = 1e-10;  % Small constant for numerical stability
-            J = J + epsilon * eye(size(J));
+            % epsilon = 1e-10;  % Small constant for numerical stability
+            % J = J + epsilon * eye(size(J));
 
-            % Compute eigenvalue decomposition of J
-            [V, D] = eig(J);
-            eigenvalues = diag(D);
 
-            % Improve conditioning by adjusting smallest eigenvalues
-            min_eigenvalue = max(eigenvalues) * 1e-12;
-            eigenvalues(eigenvalues < min_eigenvalue) = min_eigenvalue;
+            % % Compute eigenvalue decomposition of J
+            % [V, D] = eig(J);
+            % eigenvalues = diag(D);
 
-            % Reconstruct improved J
-            J_improved = V * diag(eigenvalues) * V';
+            % % Improve conditioning by adjusting smallest eigenvalues
+            % min_eigenvalue = max(eigenvalues) * 1e-12;
+            % eigenvalues(eigenvalues < min_eigenvalue) = min_eigenvalue;
+
+            % % Reconstruct improved J
+            % J_improved = V * diag(eigenvalues) * V';
 
             % Compute optimized CRLB
-            CRLB = inv(J_improved);
+            CRLB = inv(J);
 
             % Extract position-related components (assuming first 2x2 block is position)
-            pos_CRLB = CRLB(1:2, 1:2);
+            % pos_CRLB = CRLB(1:2, 1:2);
 
-            % Optional: Apply weighting to prioritize certain dimensions
-            weights = [1, 1];  % Equal weights for x and y
-            weighted_pos_CRLB = diag(weights) * pos_CRLB * diag(weights);
+            % % Optional: Apply weighting to prioritize certain dimensions
+            % weights = [1, 1];  % Equal weights for x and y
+            % weighted_pos_CRLB = diag(weights) * pos_CRLB * diag(weights);
 
             % Calculate final PEB
             peb = sqrt(trace(CRLB));
@@ -561,11 +544,11 @@ classdef RISISAC_V2X_Sim < handle
             end
 
             % Scale PEB to be between 0-12 meters
-            initial_max_peb = 150000; % Set based on your observed values
-            peb_scaled = 12 * (peb / initial_max_peb);
-            peb_scaled = max(0, min(12, peb_scaled));
+            % initial_max_peb = 150000; % Set based on your observed values
+            % peb_scaled = 12 * (peb / initial_max_peb);
+            % peb_scaled = max(0, min(12, peb_scaled));
 
-            peb = peb_scaled;
+            % peb = peb_scaled;
 
             % Store additional metrics
             additionalMetrics = struct(...

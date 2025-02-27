@@ -358,6 +358,12 @@ class FLDDPG:
         
     def select_action(self, state, explore=True):
         """Select action using the actor network with optional exploration"""
+        # real_part = np.real(state)
+        # imag_part = np.imag(state)
+        # state_decomposed =  np.concatenate([real_part, imag_part], axis=-1)
+        # print("State dtype:", state.dtype)
+        # print("State contains complex values?", np.iscomplexobj(state))
+
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
             if explore:
