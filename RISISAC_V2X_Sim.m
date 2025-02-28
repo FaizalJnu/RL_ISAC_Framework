@@ -39,10 +39,10 @@ classdef RISISAC_V2X_Sim < handle
         stepCount = 0;
         maxSteps = 10000;
         
-        car_loc = target_loc;
+        car_loc = [500,500,0];
         % Environment dimensions
         env_dims = [1000, 1000]   % Environment dimensions
-        destination = [randi([0, simulation_bounds(1)]), randi([0, simulation_bounds(2)]), 0];
+        destination;
         time = 0;
         
         % Channel matrices
@@ -75,6 +75,7 @@ classdef RISISAC_V2X_Sim < handle
             % Initialize channels
             obj.initializeChannels();
             obj.calculated_values();
+            obj.destination = [randi([0, obj.env_dims(1)]), randi([0, obj.env_dims(2)]), 0];
         end
 
         function nb = get_Nb(obj)
@@ -103,7 +104,7 @@ classdef RISISAC_V2X_Sim < handle
             obj.Pb = mean(sum(abs(Wx).^2, 1));
             % disp(['Pb: ' num2str(obj.Pb)]);
             gamma_c = obj.Pb * norm(H_combined * W, 'fro')^2 / obj.sigma_c^2;
-            obj.gamma_c = gamma_c / 1e8;
+            obj.gamma_c = gamma_c;
             % disp(['gamma_c: ' num2str(obj.gamma_c)]);
             obj.SNR = log10(obj.gamma_c);
             % precoder = eye(obj.Nb) / sqrt(obj.Nb); 
@@ -360,10 +361,17 @@ classdef RISISAC_V2X_Sim < handle
             % Check if episode has already terminated (e.g., out of bounds or reached destination)
             ris_phases = action(1:obj.Nr); 
             obj.phi = diag(exp(1j * 2 * pi * ris_phases));
+            [~,W] = computeWx(obj);
+            covar_matrix = W * W';
+            [peb] = obj.calculatePerformanceMetrics(covar_matrix);
+            % peb_min = 1;
+            % peb_max = 
+            % Calculate reward based on communication performance
+            R_min = computeR_min(obj);
             if isEpisodeDone(obj) || obj.stepCount >= obj.maxSteps
                 done = true;
-                next_state = getState(obj);
-                reward = computeReward(obj);
+                next_state = obj.getState();
+                reward = obj.computeReward(peb, obj.rate, R_min);
                 % info = struct();
                 return;
             end
@@ -384,15 +392,6 @@ classdef RISISAC_V2X_Sim < handle
             
             % Get the new state (this could be the car's position plus other sensor/angle information)
             next_state = getState(obj);  % Define getState(obj) to return your observation vector
-            
-            % Compute reward (for example, negative distance to destination or other criteria)
-            [~,W] = computeWx(obj);
-            covar_matrix = W * W';
-            [peb] = obj.calculatePerformanceMetrics(covar_matrix);
-            % peb_min = 1;
-            % peb_max = 
-            % Calculate reward based on communication performance
-            R_min = computeR_min(obj);
             % disp(['R_min: ' num2str(R_min)]);
             reward = obj.computeReward(peb, obj.rate, R_min);  % Define computeReward(obj) according to your task
             
