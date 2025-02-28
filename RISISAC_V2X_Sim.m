@@ -31,6 +31,7 @@ classdef RISISAC_V2X_Sim < handle
         rho_l = 3               % Direct path shadow fading
         rho_nl = 4              % RIS path shadow fading
         
+        starting_pos = [500,500,0]
         % Locations (in meters)
         bs_loc = [900, 100, 20]   % Base station location
         ris_loc = [200, 300, 40]  % RIS location
@@ -44,7 +45,8 @@ classdef RISISAC_V2X_Sim < handle
         env_dims = [1000, 1000]   % Environment dimensions
         destination;
         time = 0;
-        
+        arrival_threshold = 10
+
         % Channel matrices
         H_bt      % Direct channel
         H_br     % BS-RIS channel
@@ -75,7 +77,7 @@ classdef RISISAC_V2X_Sim < handle
             % Initialize channels
             obj.initializeChannels();
             obj.calculated_values();
-            obj.destination = [randi([0, obj.env_dims(1)]), randi([0, obj.env_dims(2)]), 0];
+            obj.destination = [randi([990, 1000]), randi([990, 1000]), 0];
         end
 
         function nb = get_Nb(obj)
@@ -357,51 +359,64 @@ classdef RISISAC_V2X_Sim < handle
         %     done = obj.isEpisodeDone();
         % end
 
-        function [next_state, reward, done] = step(obj,action)
-            % Check if episode has already terminated (e.g., out of bounds or reached destination)
-            ris_phases = action(1:obj.Nr); 
+        function [next_state, reward, done] = step(obj, action)
+            % Process RIS phases from action
+            ris_phases = action(1:obj.Nr);
             obj.phi = diag(exp(1j * 2 * pi * ris_phases));
             [~,W] = computeWx(obj);
             covar_matrix = W * W';
             [peb] = obj.calculatePerformanceMetrics(covar_matrix);
-            % peb_min = 1;
-            % peb_max = 
-            % Calculate reward based on communication performance
             R_min = computeR_min(obj);
-            if isEpisodeDone(obj) || obj.stepCount >= obj.maxSteps
-                done = true;
-                next_state = obj.getState();
-                reward = obj.computeReward(peb, obj.rate, R_min);
-                % info = struct();
-                return;
-            end
-        
-            % Update the vehicle's position for one time step:
+            
+            % Update the vehicle's position
             direction = (obj.destination - obj.car_loc) / norm(obj.destination - obj.car_loc);
             obj.car_loc = obj.car_loc + direction * obj.speed * obj.dt;
             obj.time = obj.time + obj.dt;
             
-            % Update the target location (if the car is the dynamic target)
+            % Update the target location
             obj.target_loc = obj.car_loc;
             
-            % Recompute geometric parameters based on the new positions
+            % Recompute geometric parameters
             [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj);
             
-            % Increase the step counter (helps enforce the max step limit per episode)
+            % Increase step counter
             obj.stepCount = obj.stepCount + 1;
             
-            % Get the new state (this could be the car's position plus other sensor/angle information)
-            next_state = getState(obj);  % Define getState(obj) to return your observation vector
-            % disp(['R_min: ' num2str(R_min)]);
-            reward = obj.computeReward(peb, obj.rate, R_min);  % Define computeReward(obj) according to your task
+            % Get new state
+            next_state = getState(obj);
             
-            % Check if the episode should be terminated (destination reached, out-of-bounds, or max steps reached)
-            done = isEpisodeDone(obj) || (obj.stepCount >= obj.maxSteps);
+            % Calculate reward - consider distance-based component
+            reward = obj.computeReward(peb, obj.rate, R_min);
             
-            % Package additional info (like delays and angles)
-            % info = struct('delays', delays, 'angles', angles);
+            % Check termination conditions
+            destination_reached = norm(obj.car_loc - obj.destination) < obj.arrival_threshold;
+            out_of_bounds = checkOutOfBounds(obj);
+            timeout = obj.stepCount >= obj.maxSteps;
+            
+            % Set done flag
+            done = destination_reached || out_of_bounds || timeout;
+            
+            % % Add debug information
+            % if done
+            %     % if destination_reached
+            %     %     disp('Episode terminated: Destination reached');
+            %     % elseif out_of_bounds
+            %     %     disp('Episode terminated: Out of bounds');
+            %     % elseif timeout
+            %     %     disp('Episode terminated: Maximum steps reached');
+            %     % end
+            %     % disp(['Final distance to goal: ' num2str(norm(obj.car_loc - obj.destination))]);
+            %     obj.reset()
+            % end
         end
-        
+
+        function out_of_bounds = checkOutOfBounds(obj)
+            if obj.car_loc(1) > 1000 || obj.car_loc(2) > 1000
+                out_of_bounds = true;
+            else
+                out_of_bounds = false;
+            end
+        end
 
         function reward = computeReward(obj, peb, rate, R_min)
             % Compute reward based on (1/PEB) with constraint penalty
@@ -431,7 +446,7 @@ classdef RISISAC_V2X_Sim < handle
 
         function done = isEpisodeDone(obj)
             % Check if vehicle has reached the destination
-            epsilon = 1.0; % Acceptable error margin in meters
+            epsilon = 10.0; % Increased threshold to 5.0 meters for more reasonable arrival detection
             reached_dest = norm(obj.car_loc - obj.destination) < epsilon;
             
             % Check if vehicle is out of bounds
@@ -442,22 +457,30 @@ classdef RISISAC_V2X_Sim < handle
             
             % Episode ends if the vehicle reaches its destination or goes out of bounds
             done = reached_dest || out_of_bounds;
+            
+            % Optional: Add debug information
+            if done && reached_dest
+                disp(['Destination reached with final distance: ' num2str(norm(obj.car_loc - obj.destination))]);
+            elseif done && out_of_bounds
+                disp('Episode terminated: Out of bounds');
+            end
         end
         
         
         function state = reset(obj)
             % Reset simulation state
             obj.initializeChannels();
-            
-            % Reset vehicle state
-            obj.vehicle.position = [500, 500, 0];
-            obj.vehicle.velocity = [10, 0, 0];
-            obj.vehicle.acceleration = [0, 0, 0];
-            obj.vehicle.heading = 0;
+            obj.calculated_values();
+            obj.destination = [randi([990, 1000]), randi([990, 1000]), 0];
+
+            obj.car_loc = obj.starting_pos;
+            obj.target_loc = obj.car_loc;
+            obj.time = 0;
+            obj.stepCount = 0;
+
             
             % Return the current state
             state = obj.getState();
-            
         end
         % ! -------------------- MACHINE LEARNING PART ENDS HERE --------------------
 
@@ -576,6 +599,7 @@ classdef RISISAC_V2X_Sim < handle
 
             % Calculate final PEB
             peb = sqrt(trace(CRLB));
+            peb = 100*peb;
             % Optionally scale PEB based on rate constraint satisfaction
             if ~rate_constraint_satisfied
                 disp("are we reaching here?")
