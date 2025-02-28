@@ -562,10 +562,6 @@ classdef RISISAC_V2X_Sim < handle
             % Option 2: Use SVD to get dominant modes
             [U, S, V] = svd(obj.H_bt + obj.H_rt * obj.phi * obj.H_br);
             H_eff = U(:, 1:obj.Nt) * S(1:obj.Nt, 1:obj.Nt) * V(:, 1:obj.Nt)';
-            
-            % Check if rate constraint is satisfied
-            R_min = computeR_min(obj); % Minimum required rate
-            rate_constraint_satisfied = (obj.rate >= R_min);
 
             % Compute FIM and CRLB
             [J, ~, ~] = computeFisherInformationMatrix(obj, precoder, H_eff);
@@ -601,11 +597,12 @@ classdef RISISAC_V2X_Sim < handle
             peb = sqrt(trace(CRLB));
             peb = 100*peb;
             % Optionally scale PEB based on rate constraint satisfaction
+            R_min = computeR_min(obj);
+            rate_constraint_satisfied = (real(obj.rate) >= R_min);
             if ~rate_constraint_satisfied
-                disp("are we reaching here?")
-                peb = peb * (1 + (R_min - obj.rate)/R_min);  % Penalty for rate constraint violation
+                % Increase PEB as penalty (current approach)
+                peb = peb * (1 + (R_min - real(obj.rate))/R_min);
             end
-
             % Scale PEB to be between 0-12 meters
             % initial_max_peb = 150000; % Set based on your observed values
             % peb_scaled = 12 * (peb / initial_max_peb);
