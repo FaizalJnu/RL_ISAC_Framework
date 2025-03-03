@@ -15,7 +15,6 @@ classdef RISISAC_V2X_Sim < handle
         lambda = 3e8/28e9;
         sigma_c = sqrt(6.31 * 10^-13);
 
-
         h_l = 0;
         h_nl = 0;
         gamma_c = 0;
@@ -24,6 +23,7 @@ classdef RISISAC_V2X_Sim < handle
         speed = 10
         end_x = 1000
         Pb = 0
+        R_min = 0
         
         % Path loss parameters
         alpha_l = 3.2             % Direct path loss exponent
@@ -112,9 +112,9 @@ classdef RISISAC_V2X_Sim < handle
 
             covariance_matrix = W * W';
 
-            obj.rate = obj.B * log2(1 + obj.gamma_c * det(eye(obj.Nt) + H_combined * covariance_matrix * H_combined') / ...
-            trace(H_combined * covariance_matrix * H_combined'));
+            obj.rate = obj.B * log2(1 + obj.gamma_c);
             obj.cc = obj.B * log2(1+obj.SNR);
+            obj.R_min = obj.B*60;
         end
         % ! -------------------- CHANNEL INITIALIZATION PART STARTS HERE --------------------        
         function initializeChannels(obj)
@@ -324,7 +324,7 @@ classdef RISISAC_V2X_Sim < handle
             % [~,W] = computeWx(obj);
             % covar_matrix = W * W';
             [peb] = obj.calculatePerformanceMetrics();
-            R_min = computeR_min(obj);
+            
             
             % Update the vehicle's position
             direction = (obj.destination - obj.car_loc) / norm(obj.destination - obj.car_loc);
@@ -344,7 +344,8 @@ classdef RISISAC_V2X_Sim < handle
             next_state = getState(obj);
             
             % Calculate reward - consider distance-based component
-            reward = obj.computeReward(peb, obj.rate, R_min);
+            reward = obj.computeReward(peb);
+            % disp(reward)
             
             % Check termination conditions
             destination_reached = norm(obj.car_loc - obj.destination) < obj.arrival_threshold;
@@ -363,15 +364,15 @@ classdef RISISAC_V2X_Sim < handle
             end
         end
 
-        function reward = computeReward(~, peb, rate, R_min)
+        function reward = computeReward(obj, peb)
             % Compute reward based on (1/PEB) with constraint penalty
             % Parameters
             Q = 0.5; % Reward factor for unsatisfied constraints (ρ in your notation)
                         % You can adjust this value between 0 and 1
             
             % Check if constraints are satisfied
-            constraints_satisfied = (rate >= R_min);
-            
+            constraints_satisfied = (obj.rate >= obj.R_min);
+
             base_reward = 1/peb;
             
             if ~constraints_satisfied
@@ -381,6 +382,10 @@ classdef RISISAC_V2X_Sim < handle
                 % Full reward when constraints are satisfied
                 reward = base_reward;
             end
+            % fprintf("this is the peb: %.4f", peb);
+            % fprintf('\n');
+            % fprintf("this is the reward: %.4f", reward);
+            % fprintf('\n');
         end
 
         function done = isEpisodeDone(obj)
@@ -484,14 +489,16 @@ classdef RISISAC_V2X_Sim < handle
 
             % Calculate final PEB
             peb = sqrt(trace(CRLB));
-            peb = 100*peb;
-            % Optionally scale PEB based on rate constraint satisfaction
-            R_min = computeR_min(obj);
-            rate_constraint_satisfied = (real(obj.rate) >= R_min);
+
+            % Calculate achieved rate (assuming obj.B is bandwidth)
+            % R_c = obj.B * log2(1 + obj.SNR);
+            % disp(R_c)
+            rate_constraint_satisfied = (obj.rate >= obj.R_min);
+
             if ~rate_constraint_satisfied
-                % Increase PEB as penalty (current approach)
-                disp("do we ever reach here?");                
-                peb = peb * (1 + (R_min - real(obj.rate))/R_min);
+                % Apply penalty - this is a better formulation
+                penalty_factor = 1 + (obj.R_min - obj.rate)/obj.R_min;
+                peb = peb * penalty_factor;
             end
         end
         

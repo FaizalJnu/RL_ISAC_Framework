@@ -131,9 +131,6 @@ class RISISACTrainer:
             # Initialize episode precoder
             # precoder = self.create_simple_precoder(self, Nb)
             
-            # Calculate initial PEB
-            current_peb = self.eng.calculatePerformanceMetrics(self.sim)
-            
             for step in range(max_steps):
                 # Select action with exploration
                 action = self.agent.select_action(state, explore=True)
@@ -142,10 +139,12 @@ class RISISACTrainer:
                 matlab_action = matlab.double(action.tolist())
                 
                 next_matlab_state, reward, done = self.eng.step(self.sim, matlab_action, nargout=3)
+                current_peb = self.eng.calculatePerformanceMetrics(self.sim)
+                print(f"Raw MATLAB Reward: {reward}, PEB: {current_peb}")
                 
                 # Process step results
                 next_state = self.process_state(next_matlab_state)
-                reward = float(abs(reward))  # Using absolute reward
+                # reward = float(abs(reward))  # Using absolute reward
                 done = bool(done)
                 
                 # Store transition and update networks
@@ -162,7 +161,8 @@ class RISISACTrainer:
                 
                 if done:
                     break
-            
+            # Calculate initial PEB
+            current_peb = self.eng.calculatePerformanceMetrics(self.sim)
             # Update metrics
             self.metrics['episode_rewards'].append(episode_reward)
             self.metrics['peb_values'].append(current_peb)
@@ -187,7 +187,7 @@ class RISISACTrainer:
             
 
             # Print progress
-            if episode % 10 == 0:
+            if episode % 1 == 0:
                 self.plot_training_progress()
                 print(f"\nEpisode {episode + 1}/{num_episodes}")
                 print(f"Reward: {episode_reward:.3f}")
