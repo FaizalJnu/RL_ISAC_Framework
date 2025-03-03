@@ -105,8 +105,7 @@ classdef RISISAC_V2X_Sim < handle
             % disp(W);
             obj.Pb = mean(sum(abs(Wx).^2, 1));
             % disp(['Pb: ' num2str(obj.Pb)]);
-            gamma_c = obj.Pb * norm(H_combined * W, 'fro')^2 / obj.sigma_c^2;
-            obj.gamma_c = gamma_c;
+            obj.gamma_c = obj.Pb * norm(H_combined * W, 'fro')^2 / obj.sigma_c^2;
             % disp(['gamma_c: ' num2str(obj.gamma_c)]);
             obj.SNR = log10(obj.gamma_c);
             % precoder = eye(obj.Nb) / sqrt(obj.Nb); 
@@ -119,14 +118,8 @@ classdef RISISAC_V2X_Sim < handle
         end
         % ! -------------------- CHANNEL INITIALIZATION PART STARTS HERE --------------------        
         function initializeChannels(obj)
-            Nr = obj.Nr;
-            Nt = obj.Nt;
-            Nb = obj.Nb;
             % Pass obj to generate_channels since it needs access to obj.lambda
-            [H_bt, H_br, H_rt] = generate_channels(obj, Nt, Nr, Nb);
-            obj.H_bt = H_bt;
-            obj.H_br = H_br;
-            obj.H_rt = H_rt;
+            [obj.H_bt, obj.H_br, obj.H_rt] = generate_channels(obj, obj.Nt, obj.Nr, obj.Nb);
             % Initialize RIS phase shifts
             rho_r = 1;
             theta = 2*pi*rand(obj.Nr,1);
@@ -137,18 +130,17 @@ classdef RISISAC_V2X_Sim < handle
         
         function [H_bt, H_br, H_rt] = generate_channels(obj, Nt, Nr, Nb)
             % Constants
-            lambda = obj.lambda; % wavelength
-            d = lambda/2; % antenna spacing
-            dr = lambda/2; % element spacing for 2D arrays
+            d = obj.lambda/2; % antenna spacing
+            dr = obj.lambda/2; % element spacing for 2D arrays
             
             % Get geometric parameters
             [~,~,~,~,~,~,~,angles] = obj.computeGeometricParameters();
             
             % Generate BS-Target channel
-            H_bt = generate_H_bt(obj, Nt, Nb, angles, lambda, d);
+            H_bt = generate_H_bt(obj, Nt, Nb, angles, obj.lambda, d);
             
             % Generate BS-RIS and RIS-Target channels
-            [H_br, H_rt] = generate_H_br_H_rt(obj, Nb, Nr, Nt, angles, lambda, d, dr);
+            [H_br, H_rt] = generate_H_br_H_rt(obj, Nb, Nr, Nt, angles, obj.lambda, d, dr);
         end
 
         function H_bt = generate_H_bt(obj, Nt, Nb, angles, lambda, d)
@@ -191,14 +183,14 @@ classdef RISISAC_V2X_Sim < handle
             H_rt = a_psi_rt * a_phi_art';
         end
 
-        function a_vec = compute_a_psi(obj, Nant, psi, lambda, d)
+        function a_vec = compute_a_psi(~, Nant, psi, lambda, d)
             k = 2*pi/lambda;
             n = 0:(Nant-1);
             phase_terms = exp(1j * k * d * n * sin(psi));
             a_vec = phase_terms(:) / sqrt(Nant);
         end
         
-        function a_phi = compute_a_phi(obj, Nx, phi_a, phi_e, lambda, dr)
+        function a_phi = compute_a_phi(~, Nx, phi_a, phi_e, lambda, dr)
             N2 = Nx * Nx;
             a_phi = zeros(N2, 1);
             k = 2*pi/lambda;
@@ -215,7 +207,7 @@ classdef RISISAC_V2X_Sim < handle
             a_phi = a_phi / sqrt(N2);
         end
 
-        function H_Los = generate_H_Los(obj, H_bt, Nt, Nr, Nb)
+        function H_Los = generate_H_Los(obj, H_bt, Nt, ~, Nb)
             % Parameters
             K_dB = 4; % Rician K-factor in dB
             K = 10^(K_dB/10);
@@ -258,10 +250,10 @@ classdef RISISAC_V2X_Sim < handle
             obj.h_nl = (sigma * complex(randn(1,1), randn(1,1))) + mu;
             
             % Path loss in linear scale
-            rho_nl = 4;
+            obj.rho_nl = 4;
             
             % Calculate gamma_nl
-            gamma_nl = sqrt(Nb*Nr)/sqrt(rho_nl);
+            gamma_nl = sqrt(Nb*Nr)/sqrt(obj.rho_nl);
             
             [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters(obj);
             tau_nl = delays.non_line_of_sight;
@@ -324,48 +316,14 @@ classdef RISISAC_V2X_Sim < handle
             % disp('Max imaginary part: '), max(abs(imag(state(:))))
 
         end
-        
-        % function [next_state, reward, done] = step(obj, action)
-        %     % Parse action vector - only for RIS phase shifts
-        %     % Assuming action is a vector of phase shifts for each RIS element
-        %     ris_phases = action(1:obj.Nr); 
-            
-        %     % Update RIS phase shifts (normalized between 0 and 2π)
-        %     obj.phi = diag(exp(1j * 2 * pi * ris_phases));
-            
-        %     % Calculate performance metrics considering fixed positions
-        %     % precoder = eye(obj.Nb) / sqrt(obj.Nb);  % Simple precoder
-        %     [Wx,W] = computeWx(obj);
-        %     covar_matrix = W * W';
-        %     [peb] = obj.calculatePerformanceMetrics(covar_matrix);
-        %     % peb_min = 1;
-        %     % peb_max = 
-        %     % Calculate reward based on communication performance
-        %     R_min = computeR_min(obj);
-        %     % disp(['R_min: ' num2str(R_min)]);
-        %     reward = obj.computeReward(peb, obj.rate, R_min);
-
-        %     % if reward<=0
-        %     %     reward = rand(0.0,1.8);
-        %     % end
-            
-        %     % Get next state
-        %     next_state = obj.getState();
-        %     % disp(['Next state size: ' num2str(size(next_state))]);
-        %     % disp("no, it is not");
-            
-        %     % Check if episode is done (based on maximum steps or achieved performance)
-        %     % You might want to modify this condition based on your requirements
-        %     done = obj.isEpisodeDone();
-        % end
 
         function [next_state, reward, done] = step(obj, action)
             % Process RIS phases from action
             ris_phases = action(1:obj.Nr);
             obj.phi = diag(exp(1j * 2 * pi * ris_phases));
-            [~,W] = computeWx(obj);
-            covar_matrix = W * W';
-            [peb] = obj.calculatePerformanceMetrics(covar_matrix);
+            % [~,W] = computeWx(obj);
+            % covar_matrix = W * W';
+            [peb] = obj.calculatePerformanceMetrics();
             R_min = computeR_min(obj);
             
             % Update the vehicle's position
@@ -377,7 +335,7 @@ classdef RISISAC_V2X_Sim < handle
             obj.target_loc = obj.car_loc;
             
             % Recompute geometric parameters
-            [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj);
+            [~,~,~,~,~,~,~,~] = computeGeometricParameters(obj);
             
             % Increase step counter
             obj.stepCount = obj.stepCount + 1;
@@ -395,19 +353,6 @@ classdef RISISAC_V2X_Sim < handle
             
             % Set done flag
             done = destination_reached || out_of_bounds || timeout;
-            
-            % % Add debug information
-            % if done
-            %     % if destination_reached
-            %     %     disp('Episode terminated: Destination reached');
-            %     % elseif out_of_bounds
-            %     %     disp('Episode terminated: Out of bounds');
-            %     % elseif timeout
-            %     %     disp('Episode terminated: Maximum steps reached');
-            %     % end
-            %     % disp(['Final distance to goal: ' num2str(norm(obj.car_loc - obj.destination))]);
-            %     obj.reset()
-            % end
         end
 
         function out_of_bounds = checkOutOfBounds(obj)
@@ -418,7 +363,7 @@ classdef RISISAC_V2X_Sim < handle
             end
         end
 
-        function reward = computeReward(obj, peb, rate, R_min)
+        function reward = computeReward(~, peb, rate, R_min)
             % Compute reward based on (1/PEB) with constraint penalty
             % Parameters
             Q = 0.5; % Reward factor for unsatisfied constraints (ρ in your notation)
@@ -427,8 +372,6 @@ classdef RISISAC_V2X_Sim < handle
             % Check if constraints are satisfied
             constraints_satisfied = (rate >= R_min);
             
-            % Calculate base reward as 1/PEB
-            % disp(size(peb));
             base_reward = 1/peb;
             
             if ~constraints_satisfied
@@ -438,10 +381,6 @@ classdef RISISAC_V2X_Sim < handle
                 % Full reward when constraints are satisfied
                 reward = base_reward;
             end
-
-            % if reward <= 0
-            %     reward = rand(0.0,1.8);
-            % end 
         end
 
         function done = isEpisodeDone(obj)
@@ -486,25 +425,6 @@ classdef RISISAC_V2X_Sim < handle
 
         % ! -------------------- PEB COMPUTATION PART STARTS HERE --------------------
         
-        % function updateVehicleDynamics(obj)
-        %     % Constrain inputs
-        %     while norm(obj.car_loc - obj.destination) > obj.speed * obj.dt
-        %         % Move towards destination
-        %         direction = (obj.destination - obj.car_loc) / norm(obj.destination - obj.car_loc);
-        %         obj.car_loc = obj.car_loc + direction * obj.speed * obj.dt;
-        %         obj.time = obj.time + obj.dt;
-        
-        %         % Update target location dynamically
-        %         obj.target_loc = obj.car_loc;  % Treat car as a dynamic target
-        
-        %         % Compute new geometric parameters
-        %         [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj);
-        
-        %         % Pause for visualization (optional)
-        %         pause(0.1);
-        %     end
-        % end
-        
 
         function [R_min] = computeR_min(obj)
             % Shannon capacity formula for baseline
@@ -521,9 +441,6 @@ classdef RISISAC_V2X_Sim < handle
             xr = obj.ris_loc(1);   yr = obj.ris_loc(2);   zr = obj.ris_loc(3);
             xt = obj.target_loc(1); yt = obj.target_loc(2); zt = obj.target_loc(3);
             
-            % Speed of light
-            c = 3e8;
-            
             % Calculate 3D Euclidean distances
             L1 = sqrt((xb - xr)^2 + (yb - yr)^2 + (zb - zr)^2);
             L2 = sqrt((xr - xt)^2 + (yr - yt)^2 + zr^2);
@@ -536,8 +453,8 @@ classdef RISISAC_V2X_Sim < handle
             
             % ? there is a delay calculation code here
             % Calculate signal delays
-            delays.line_of_sight = L3 / c;
-            delays.non_line_of_sight = (L1 + L2) / c;
+            delays.line_of_sight = L3 / obj.c;
+            delays.non_line_of_sight = (L1 + L2) / obj.c;
             
             % Calculate angles
             % BS to RIS angles
@@ -555,43 +472,15 @@ classdef RISISAC_V2X_Sim < handle
             angles.bs_to_target_receive = asin(zb/L3);
         end
 
-        function [peb] = calculatePerformanceMetrics(obj, precoder)
+        function [peb] = calculatePerformanceMetrics(obj)
             % Compute geometric parameters
-            [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = obj.computeGeometricParameters();
-
-            % Option 2: Use SVD to get dominant modes
-            [U, S, V] = svd(obj.H_bt + obj.H_rt * obj.phi * obj.H_br);
-            H_eff = U(:, 1:obj.Nt) * S(1:obj.Nt, 1:obj.Nt) * V(:, 1:obj.Nt)';
+            % [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = obj.computeGeometricParameters();
 
             % Compute FIM and CRLB
-            [J, ~, ~] = computeFisherInformationMatrix(obj, precoder, H_eff);
-             
-            % Minimize PEB by optimizing the inverse of FIM (CRLB)
-            % First, ensure J is well-conditioned
-            % epsilon = 1e-10;  % Small constant for numerical stability
-            % J = J + epsilon * eye(size(J));
-
-
-            % % Compute eigenvalue decomposition of J
-            % [V, D] = eig(J);
-            % eigenvalues = diag(D);
-
-            % % Improve conditioning by adjusting smallest eigenvalues
-            % min_eigenvalue = max(eigenvalues) * 1e-12;
-            % eigenvalues(eigenvalues < min_eigenvalue) = min_eigenvalue;
-
-            % % Reconstruct improved J
-            % J_improved = V * diag(eigenvalues) * V';
+            [J, ~, ~] = computeFisherInformationMatrix(obj);
 
             % Compute optimized CRLB
             CRLB = inv(J);
-
-            % Extract position-related components (assuming first 2x2 block is position)
-            % pos_CRLB = CRLB(1:2, 1:2);
-
-            % % Optional: Apply weighting to prioritize certain dimensions
-            % weights = [1, 1];  % Equal weights for x and y
-            % weighted_pos_CRLB = diag(weights) * pos_CRLB * diag(weights);
 
             % Calculate final PEB
             peb = sqrt(trace(CRLB));
@@ -601,36 +490,14 @@ classdef RISISAC_V2X_Sim < handle
             rate_constraint_satisfied = (real(obj.rate) >= R_min);
             if ~rate_constraint_satisfied
                 % Increase PEB as penalty (current approach)
+                disp("do we ever reach here?");                
                 peb = peb * (1 + (R_min - real(obj.rate))/R_min);
             end
-            % Scale PEB to be between 0-12 meters
-            % initial_max_peb = 150000; % Set based on your observed values
-            % peb_scaled = 12 * (peb / initial_max_peb);
-            % peb_scaled = max(0, min(12, peb_scaled));
-
-            % peb = peb_scaled;
-
-            % Store additional metrics
-            additionalMetrics = struct(...
-                'Distances', struct(...
-                    'L1', L1, ...
-                    'L2', L2, ...
-                    'L3', L3, ...
-                    'L_proj1', L_proj1, ...
-                    'L_proj2', L_proj2, ...
-                    'L_proj3', L_proj3 ...
-                ), ...
-                'Delays', delays, ...
-                'Angles', angles, ...
-                'SNR', obj.SNR, ...
-                'Gamma', obj.gamma_c, ...
-                'RateConstraintSatisfied', rate_constraint_satisfied ...
-            );
         end
         
         function [T, dParams] = computeTransformationMatrix(obj)
             % Compute initial geometric parameters
-            [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj);
+            [L1, L2, L3, ~, ~, ~, ~, ~] = computeGeometricParameters(obj);
             
             % Initialize transformation matrix
             T = zeros(2, 7);
@@ -714,7 +581,7 @@ classdef RISISAC_V2X_Sim < handle
         function [dx, dy] = computeTimeDelayDerivatives(obj, varargin)
             % Numerical differentiation of time delays
             epsilon = 1e-8;  % Small perturbation
-            c = 3e8;  % Speed of light
+            obj.c = 3e8;  % Speed of light
             
             % Original location
             orig_loc = obj.target_loc;
@@ -734,21 +601,21 @@ classdef RISISAC_V2X_Sim < handle
             if length(varargin) == 2 && strcmp(varargin{2}, 'line_of_sight')
                 % Line of sight delay (L3/c)
                 L3_orig = norm(obj.bs_loc - orig_loc);
-                tau_l_orig = L3_orig / c;
+                tau_l_orig = L3_orig / obj.c;
                 
                 L3_dx_pos = norm(obj.bs_loc - dx_perturb_pos);
                 L3_dx_neg = norm(obj.bs_loc - dx_perturb_neg);
                 L3_dy_pos = norm(obj.bs_loc - dy_perturb_pos);
                 L3_dy_neg = norm(obj.bs_loc - dy_perturb_neg);
                 
-                dx = (L3_dx_pos/c - L3_dx_neg/c) / (2 * epsilon);
-                dy = (L3_dy_pos/c - L3_dy_neg/c) / (2 * epsilon);
+                dx = (L3_dx_pos/obj.c - L3_dx_neg/obj.c) / (2 * epsilon);
+                dy = (L3_dy_pos/obj.c - L3_dy_neg/obj.c) / (2 * epsilon);
             
             elseif length(varargin) == 3 && strcmp(varargin{3}, 'non_line_of_sight')
                 % Non-line of sight delay (L1 + L2)/c
                 L1_orig = norm(obj.bs_loc - obj.ris_loc);
                 L2_orig = norm(obj.ris_loc - orig_loc);
-                tau_nl_orig = (L1_orig + L2_orig) / c;
+                tau_nl_orig = (L1_orig + L2_orig) / obj.c;
                 
                 % Compute perturbed distances
                 L1_dx_pos = norm(obj.bs_loc - obj.ris_loc);
@@ -761,8 +628,8 @@ classdef RISISAC_V2X_Sim < handle
                 L1_dy_neg = norm(obj.bs_loc - obj.ris_loc);
                 L2_dy_neg = norm(obj.ris_loc - dy_perturb_neg);
                 
-                dx = ((L1_dx_pos + L2_dx_pos)/c - (L1_dx_neg + L2_dx_neg)/c) / (2 * epsilon);
-                dy = ((L1_dy_pos + L2_dy_pos)/c - (L1_dy_neg + L2_dy_neg)/c) / (2 * epsilon);
+                dx = ((L1_dx_pos + L2_dx_pos)/obj.c - (L1_dx_neg + L2_dx_neg)/obj.c) / (2 * epsilon);
+                dy = ((L1_dy_pos + L2_dy_pos)/obj.c - (L1_dy_neg + L2_dy_neg)/obj.c) / (2 * epsilon);
             else
                 error('Invalid time delay computation');
             end
@@ -851,7 +718,7 @@ classdef RISISAC_V2X_Sim < handle
             abr = abr / sqrt(N); % Normalization
         end
         
-        function angle_diff = computeAngleDifference(obj, ref_loc, target_loc, angleType)
+        function angle_diff = computeAngleDifference(~, ref_loc, target_loc, angleType)
             % Ensure inputs are column vectors
             ref_loc = ref_loc(:);
             target_loc = target_loc(:);
@@ -917,54 +784,29 @@ classdef RISISAC_V2X_Sim < handle
         end
         
         function [Wx, W] = computeWx(obj)
-            Nb = obj.Nb;  % Number of base stations
-            Mb = obj.Mb;  % Number of beams
             N = obj.Ns;    % Number of subcarriers
             
             % Generate beamforming matrix W [Nb x Mb]
-            W = rand(Nb, Mb) + 1j*randn(Nb, Mb);
+            W = rand(obj.Nb, obj.Mb) + 1j*randn(obj.Nb, obj.Mb);
             W = W ./ vecnorm(W);  % Normalize each column
             
             % Generate transmit data x[n] for each subcarrier n
             % x[n] is Mb x 1 complex Gaussian with zero mean and unit variance
-            X = (randn(Mb, N) + 1j*randn(Mb, N)) / sqrt(2);  % Division by sqrt(2) ensures unit variance
+            X = (randn(obj.Mb, N) + 1j*randn(obj.Mb, N)) / sqrt(2);  % Division by sqrt(2) ensures unit variance
             
             % Calculate Wx[n] for all subcarriers
             Wx = W * X;  % Results in [Nb x N] matrix where each column is Wx[n] for nth subcarrier
         end
         
-        function [J, Jzao, T] = computeFisherInformationMatrix(obj, precoder, H_eff)
-
-            [Wx,W] = computeWx(obj);
-            Pb =  norm(Wx)^2; 
-            B = obj.B;  % Bandwidth
-            N = obj.Nt;
-            SNR = log10(obj.gamma_c);
-            
-            sigma_s = sqrt(SNR/Pb);  % Noise variance (placeholder)
-            lambda = obj.lambda;  % Wavelength
-            
-            % Compute geometric parameters
-            [~, ~, ~, ~, ~, ~, delays, angles] = computeGeometricParameters(obj);
-            
-            % Estimated parameter vector
-            % zeta = [
-            %     delays.line_of_sight; 
-            %     delays.non_line_of_sight; 
-            %     angles.ris_to_target.aoa; 
-            %     angles.ris_to_target.azimuth; 
-            %     angles.ris_to_target.elevation_angle; 
-            %     computeBSTargetAngles(obj)
-            % ];
-            [T, dParams] = computeTransformationMatrix(obj);
-            Nb = obj.Nb;
-            Nt = obj.Nt;
+        function [J, Jzao, T] = computeFisherInformationMatrix(obj)
+            sigma_s = sqrt(obj.SNR/obj.Pb);  % Noise variance (placeholder)
+            [T, ~] = computeTransformationMatrix(obj);
             [Wx,~] = computeWx(obj);
-            gamma_l = sqrt(Nb*Nt)/sqrt(obj.rho_l);
-            gamma_nl = sqrt(Nb*Nt)/sqrt(obj.rho_nl);
+            gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
+            gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
             
-            [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, N, B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
-            [Jzao] = calculateJacobianMatrix(obj, Pb, sigma_s, N, Wx, A1, A2, A3, A4);
+            [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, obj.Nt, obj.B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
+            [Jzao] = calculateJacobianMatrix(obj, obj.Pb, sigma_s, obj.Nt, Wx, A1, A2, A3, A4);
             
             % Compute final Fisher Information Matrix
             J = T * Jzao * T';
@@ -972,8 +814,8 @@ classdef RISISAC_V2X_Sim < handle
         
         function [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, N, B, gamma_l, gamma_nl, h_l, h_nl)
             [~, ~, ~, ~, ~, ~, delays, ~] = computeGeometricParameters(obj);
-            tau_nl = delays.non_line_of_sight;
-            tau_l = delays.line_of_sight;
+            % tau_nl = delays.non_line_of_sight;
+            % tau_l = delays.line_of_sight;
 
             % Calculate A3 and A4 for each n
             for n = 1:N
@@ -992,16 +834,16 @@ classdef RISISAC_V2X_Sim < handle
             % Initialize 7x7 Jacobian matrix
             J_zao = zeros(7, 7);
             
-            % Calculate mu for each n
-            mu = zeros(size(Wx));
-            H_Los = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nr, obj.Nb);
-            % H_Los_proj = H_Los * (eye(obj.Nr)/sqrt(obj.Nr));
-            HNLos = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
-            % H_combined = H_Los_proj + HNLos;
-            % for n = 1:N
-            %     mu(:,n) = (H_Los(:,:,n) + HNLos(:,:,n)) * Wx(:,n);
-            % end
-            mu = (H_Los + HNLos)*Wx;
+            % % Calculate mu for each n
+            % mu = zeros(size(Wx));
+            % H_Los = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nr, obj.Nb);
+            % % H_Los_proj = H_Los * (eye(obj.Nr)/sqrt(obj.Nr));
+            % HNLos = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
+            % % H_combined = H_Los_proj + HNLos;
+            % % for n = 1:N
+            % %     mu(:,n) = (H_Los(:,:,n) + HNLos(:,:,n)) * Wx(:,n);
+            % % end
+            % mu = (H_Los + HNLos)*Wx;
             
 
             [~, ~, ~, ~, ~, ~, ~, angles] = computeGeometricParameters(obj);

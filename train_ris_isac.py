@@ -129,10 +129,10 @@ class RISISACTrainer:
             episode_losses = {'actor': [], 'critic': []}
             
             # Initialize episode precoder
-            precoder = self.create_simple_precoder(self, Nb)
+            # precoder = self.create_simple_precoder(self, Nb)
             
             # Calculate initial PEB
-            current_peb = self.eng.calculatePerformanceMetrics(self.sim, precoder)
+            current_peb = self.eng.calculatePerformanceMetrics(self.sim)
             
             for step in range(max_steps):
                 # Select action with exploration
