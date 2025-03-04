@@ -140,7 +140,7 @@ class RISISACTrainer:
                 
                 next_matlab_state, reward, done = self.eng.step(self.sim, matlab_action, nargout=3)
                 current_peb = self.eng.calculatePerformanceMetrics(self.sim)
-                print(f"Raw MATLAB Reward: {reward}, PEB: {current_peb}")
+                print(f"Step {step}: Raw Reward={reward}, PEB={current_peb}, Accumulated Reward={episode_reward}")
                 
                 # Process step results
                 next_state = self.process_state(next_matlab_state)
