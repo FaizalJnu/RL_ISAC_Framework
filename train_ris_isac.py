@@ -164,8 +164,6 @@ class RISISACTrainer:
                 if done:
                     break
             episode_reward = episode_reward/step_counter    
-            # Calculate initial PEB
-            current_peb = self.eng.calculatePerformanceMetrics(self.sim)
             # Update metrics
             self.metrics['episode_rewards'].append(episode_reward)
             self.metrics['peb_values'].append(current_peb)

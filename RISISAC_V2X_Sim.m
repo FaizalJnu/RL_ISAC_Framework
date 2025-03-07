@@ -497,7 +497,7 @@ classdef RISISAC_V2X_Sim < handle
             [J, ~, ~] = computeFisherInformationMatrix(obj);
 
             % Compute optimized CRLB
-            CRLB = pinv(J);
+            CRLB = inv(J);
 
             % Calculate final PEB
             peb = sqrt(trace(CRLB));
@@ -513,6 +513,9 @@ classdef RISISAC_V2X_Sim < handle
                 peb = peb * penalty_factor;
             end
             peb = sqrt((real(peb)^2) - (imag(peb)^2));
+            if(peb>12)
+                peb=12;
+            end
         end
         
         function [T] = computeTransformationMatrix(obj)
