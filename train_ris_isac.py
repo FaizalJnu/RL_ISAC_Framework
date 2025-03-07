@@ -123,14 +123,17 @@ class RISISACTrainer:
             # Reset environment
             matlab_state = self.eng.reset(self.sim)
             state = self.process_state(matlab_state)
-            # print("State dtype:", matlab_state.dtype)
-            # print("Contains complex values?", np.iscomplexobj(matlab_state))
             episode_reward = 0
             episode_losses = {'actor': [], 'critic': []}
             
+            # Initialize PEB tracking for this episode
+            initial_peb = float(self.eng.calculatePerformanceMetrics(self.sim))
+            min_peb_in_episode = initial_peb
+            max_peb_in_episode = initial_peb
+            peb_values_in_episode = [initial_peb]
+            
             # Initialize episode precoder
-            # precoder = self.create_simple_precoder(self, Nb)
-            step_counter = 0;
+            step_counter = 0
             
             for step in range(max_steps):
                 step_counter = step_counter + 1
@@ -141,12 +144,15 @@ class RISISACTrainer:
                 matlab_action = matlab.double(action.tolist())
                 
                 next_matlab_state, reward, done = self.eng.step(self.sim, matlab_action, nargout=3)
-                current_peb = self.eng.calculatePerformanceMetrics(self.sim)
-                # print(f"Raw MATLAB Reward: {reward}, PEB: {current_peb}")
+                current_peb = float(self.eng.calculatePerformanceMetrics(self.sim))
+                
+                # Track PEB values
+                peb_values_in_episode.append(current_peb)
+                min_peb_in_episode = min(min_peb_in_episode, current_peb)
+                max_peb_in_episode = max(max_peb_in_episode, current_peb)
                 
                 # Process step results
                 next_state = self.process_state(next_matlab_state)
-                # reward = float(abs(reward))  # Using absolute reward
                 done = bool(done)
                 
                 # Store transition and update networks
@@ -163,10 +169,33 @@ class RISISACTrainer:
                 
                 if done:
                     break
-            episode_reward = episode_reward/step_counter    
-            # Update metrics
+            
+            # Calculate average PEB for the episode
+            avg_peb_in_episode = sum(peb_values_in_episode) / len(peb_values_in_episode)
+            last_peb_in_episode = current_peb
+            
+            # Normalize reward
+            episode_reward = episode_reward/step_counter
+            
+            # Store PEB metrics
+            if 'initial_peb_values' not in self.metrics:
+                self.metrics.update({
+                    'initial_peb_values': [],
+                    'min_peb_values': [],
+                    'max_peb_values': [],
+                    'avg_peb_values': [],
+                    'last_peb_values': []
+                })
+            
+            self.metrics['initial_peb_values'].append(initial_peb)
+            self.metrics['min_peb_values'].append(min_peb_in_episode)
+            self.metrics['max_peb_values'].append(max_peb_in_episode)
+            self.metrics['avg_peb_values'].append(avg_peb_in_episode)
+            self.metrics['last_peb_values'].append(last_peb_in_episode)
+            
+            # Update existing metrics
             self.metrics['episode_rewards'].append(episode_reward)
-            self.metrics['peb_values'].append(current_peb)
+            self.metrics['peb_values'].append(current_peb)  # For backward compatibility
             if episode_losses['actor']:
                 self.metrics['actor_losses'].append(np.mean(episode_losses['actor']))
                 self.metrics['critic_losses'].append(np.mean(episode_losses['critic']))
@@ -178,31 +207,37 @@ class RISISACTrainer:
                 self.best_metrics['reward_episode'] = episode
                 self.save_checkpoint(episode, self.metrics, 'best_reward')
             
-            if abs(current_peb) < abs(self.best_metrics['peb']):
-                self.best_metrics['peb'] = current_peb
+            # When updating best metrics
+            if min_peb_in_episode < self.best_metrics['peb']:
+                self.best_metrics['peb'] = min_peb_in_episode
                 self.best_metrics['peb_episode'] = episode
                 self.save_checkpoint(episode, self.metrics, 'best_peb')
+
             
             # Decay learning rates
             decay_rate = self.agent.decay_learning_rates()
             
-
             # Print progress
-            if episode % 10 == 0:
+            if episode % 1 == 0:
                 self.plot_training_progress()
                 print(f"\nEpisode {episode + 1}/{num_episodes}")
                 print(f"Reward: {episode_reward:.3f}")
-                print(f"PEB: {current_peb:.6f}")
-                print(f"Best PEB: {self.best_metrics['peb']:.6f}")
+                print(f"Initial PEB: {initial_peb:.6f}")
+                print(f"Min PEB: {min_peb_in_episode:.6f}")
+                print(f"Max PEB: {max_peb_in_episode:.6f}")
+                print(f"Avg PEB: {avg_peb_in_episode:.6f}")
+                print(f"Last PEB: {last_peb_in_episode:.6f}")
+                print(f"Best PEB (all episodes): {self.best_metrics['peb']:.6f}")
                 print(f"Learning Rate: {self.agent.current_actor_lr:.6f}")
                 print(f"Buffer Size: {len(self.agent.replay_buffer)}")
                 print(f"Decay rate is: {decay_rate}")
                 print("-" * 50)
             
             # Early stopping check
-            if episode > 1000 and np.mean(self.metrics['peb_values'][-1000:]) < target_peb:
+            if episode > 1000 and np.mean(self.metrics['min_peb_values'][-1000:]) < target_peb:
                 print(f"Early stopping at episode {episode} - Target PEB achieved")
                 break
+
         
         return self.metrics
     
@@ -248,6 +283,26 @@ if __name__ == "__main__":
         # Test the trained agent
         print("\nTesting trained agent...")
         trainer.test(num_episodes=10)
+
+        plt.figure(figsize=(15, 10))
+
+        # Plot PEB metrics
+        plt.subplot(2, 2, 1)
+        plt.plot(trainer.metrics['initial_peb_values'], label='Initial PEB')
+        plt.plot(trainer.metrics['last_peb_values'], label='Last PEB')
+        plt.title('Initial vs Final PEB per Episode')
+        plt.xlabel('Episode')
+        plt.ylabel('PEB')
+        plt.legend()
+
+        plt.subplot(2, 2, 2)
+        plt.plot(trainer.metrics['min_peb_values'], label='Min PEB')
+        plt.plot(trainer.metrics['avg_peb_values'], label='Avg PEB')
+        plt.plot(trainer.metrics['max_peb_values'], label='Max PEB')
+        plt.title('PEB Statistics per Episode')
+        plt.xlabel('Episode')
+        plt.ylabel('PEB')
+        plt.legend()
         
         # Plot training rewards
         plt.figure(figsize=(10, 5))
