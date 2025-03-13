@@ -118,7 +118,13 @@ class RISISACTrainer:
     def train(self, num_episodes, max_steps, target_peb):
         print("Starting training...")
         Nb = self.eng.get_Nb(self.sim)
-        
+        epsilon_start = 1.0
+        epsilon_en = 0.01
+        epsilon_decay_rate = 0.995
+        peb_ae = [[] for _ in range(300)]
+        prev_peb = 12
+        avg_rate = []
+        rate_values = [[] for _ in range(300)]
         for episode in range(num_episodes):
             # Reset environment
             matlab_state = self.eng.reset(self.sim)
@@ -136,16 +142,23 @@ class RISISACTrainer:
             step_counter = 0
             
             for step in range(max_steps):
+                value = np.random.uniform(0,1)
+                if (value < epsilon_start):
+                    explore = True
+                else:
+                    explore = False
+                epsilon_start = max(epsilon_en, epsilon_start*epsilon_decay_rate)
                 step_counter = step_counter + 1
                 # Select action with exploration
-                action = self.agent.select_action(state, explore=True)
+                action = self.agent.select_action(state, explore)
                 
                 # Convert and execute action
                 matlab_action = matlab.double(action.tolist())
                 
                 next_matlab_state, reward, done = self.eng.step(self.sim, matlab_action, nargout=3)
                 current_peb = float(self.eng.calculatePerformanceMetrics(self.sim))
-                
+                rate_values[episode].append(float(self.eng.getrate(self.sim)))
+                peb_ae[episode].append(current_peb)
                 # Track PEB values
                 peb_values_in_episode.append(current_peb)
                 min_peb_in_episode = min(min_peb_in_episode, current_peb)
@@ -168,11 +181,14 @@ class RISISACTrainer:
                 state = next_state
                 
                 if done:
+                    prev_peb = current_peb
                     break
+            
             
             # Calculate average PEB for the episode
             avg_peb_in_episode = sum(peb_values_in_episode) / len(peb_values_in_episode)
             last_peb_in_episode = current_peb
+            avg_rate = np.mean(rate_values[episode])
             
             # Normalize reward
             episode_reward = episode_reward/step_counter
@@ -184,7 +200,8 @@ class RISISACTrainer:
                     'min_peb_values': [],
                     'max_peb_values': [],
                     'avg_peb_values': [],
-                    'last_peb_values': []
+                    'last_peb_values': [],
+                    'avg_rate': []
                 })
             
             self.metrics['initial_peb_values'].append(initial_peb)
@@ -192,9 +209,9 @@ class RISISACTrainer:
             self.metrics['max_peb_values'].append(max_peb_in_episode)
             self.metrics['avg_peb_values'].append(avg_peb_in_episode)
             self.metrics['last_peb_values'].append(last_peb_in_episode)
-            
-            # Update existing metrics
             self.metrics['episode_rewards'].append(episode_reward)
+            self.metrics['avg_rate'].append(avg_rate)
+
             self.metrics['peb_values'].append(current_peb)  # For backward compatibility
             if episode_losses['actor']:
                 self.metrics['actor_losses'].append(np.mean(episode_losses['actor']))
@@ -218,7 +235,7 @@ class RISISACTrainer:
             decay_rate = self.agent.decay_learning_rates()
             
             # Print progress
-            if episode % 1 == 0:
+            if episode % 10 == 0:
                 self.plot_training_progress()
                 print(f"\nEpisode {episode + 1}/{num_episodes}")
                 print(f"Reward: {episode_reward:.3f}")
@@ -284,25 +301,25 @@ if __name__ == "__main__":
         print("\nTesting trained agent...")
         trainer.test(num_episodes=10)
 
-        plt.figure(figsize=(15, 10))
+        # plt.figure(figsize=(15, 10))
 
-        # Plot PEB metrics
-        plt.subplot(2, 2, 1)
-        plt.plot(trainer.metrics['initial_peb_values'], label='Initial PEB')
-        plt.plot(trainer.metrics['last_peb_values'], label='Last PEB')
-        plt.title('Initial vs Final PEB per Episode')
-        plt.xlabel('Episode')
-        plt.ylabel('PEB')
-        plt.legend()
+        # # Plot PEB metrics
+        # plt.subplot(2, 2, 1)
+        # plt.plot(trainer.metrics['initial_peb_values'], label='Initial PEB')
+        # plt.plot(trainer.metrics['last_peb_values'], label='Last PEB')
+        # plt.title('Initial vs Final PEB per Episode')
+        # plt.xlabel('Episode')
+        # plt.ylabel('PEB')
+        # plt.legend()
 
-        plt.subplot(2, 2, 2)
-        plt.plot(trainer.metrics['min_peb_values'], label='Min PEB')
-        plt.plot(trainer.metrics['avg_peb_values'], label='Avg PEB')
-        plt.plot(trainer.metrics['max_peb_values'], label='Max PEB')
-        plt.title('PEB Statistics per Episode')
-        plt.xlabel('Episode')
-        plt.ylabel('PEB')
-        plt.legend()
+        # plt.subplot(2, 2, 2)
+        # plt.plot(trainer.metrics['min_peb_values'], label='Min PEB')
+        # plt.plot(trainer.metrics['avg_peb_values'], label='Avg PEB')
+        # plt.plot(trainer.metrics['max_peb_values'], label='Max PEB')
+        # plt.title('PEB Statistics per Episode')
+        # plt.xlabel('Episode')
+        # plt.ylabel('PEB')
+        # plt.legend()
         
         # Plot training rewards
         plt.figure(figsize=(10, 5))
@@ -314,7 +331,7 @@ if __name__ == "__main__":
         plt.show()
         
         plt.figure(figsize=(10, 5))
-        plt.plot(episodes, metrics['peb_values'])
+        plt.plot(episodes, metrics['min_peb_values'])
         plt.title('Performance Error Bound (PEB) over Episodes')
         plt.xlabel('Episode')
         plt.ylabel('PEB Value')
@@ -322,6 +339,15 @@ if __name__ == "__main__":
         plt.savefig('peb_values.png')
         plt.show()
         
+        plt.figure(figsize=(10,5))
+        plt.plot(episodes, metrics['avg_rate'])
+        plt.title('Average rate per epsiode')
+        plt.xlabel('Episode')
+        plt.ylabel('Rate(Bits/s/hz)')
+        plt.grid(True)
+        plt.savefig('Rate_per_episode')
+        plt.show()
+
     finally:
         # Clean up
         trainer.close()
