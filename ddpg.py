@@ -7,10 +7,8 @@ import random
 import copy
 
 class ActorNetwork(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_dims=[400, 300], epsilon=0.1):
+    def __init__(self, state_dim, action_dim, hidden_dims=[400, 300]):
         super(ActorNetwork, self).__init__()
-        
-        self.epsilon = epsilon
         layers = []
         prev_dim = state_dim
         for hidden_dim in hidden_dims:
@@ -29,11 +27,9 @@ class ActorNetwork(nn.Module):
     def forward(self, state):
         return self.policy_network(state)
     
-    def get_action_with_noise(self, state):
+    def get_action(self, state):
         action = self.forward(state)
-        noise = torch.randn_like(action) * self.epsilon
-        noisy_action = action + noise
-        return torch.clamp(noisy_action, -1.0, 1.0)
+        return action
 
 class CriticNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dims=[400, 300]):
@@ -155,10 +151,13 @@ class FLDDPG:
     def __init__(self, state_dim, action_dim, hidden_dims=[400, 300], buffer_size=10000,
                  batch_size=16, gamma=0.95, tau=0.00001, actor_lr=1e-3, critic_lr=1e-3,
                  lr_decay_rate=0.995, min_lr=1e-6):
+        
+        #? Selecting GPU based on device
         if(torch.backends.mps.is_available()):
             self.device = torch.device("mps")
         else:
             self.device = torch.device("cuda")
+        
         self.target_actor = TargetActorNetwork(
             state_dim=state_dim,
             action_dim=action_dim,
@@ -172,6 +171,7 @@ class FLDDPG:
             hidden_dims=hidden_dims,
             tau=tau
         ).to(self.device)
+        
         self.actor = self.target_actor.get_online_network()
         self.critic = self.target_critic.get_online_network()
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
@@ -179,10 +179,6 @@ class FLDDPG:
         self.gamma = gamma
         self.batch_size = batch_size
         self.replay_buffer = ReplayBuffer(buffer_size, state_dim)
-
-        self.epsilon = 0.5 
-        self.epsilon_decay = 0.995
-        self.min_epsilon = 0.01
 
         self.initial_actor_lr = actor_lr
         self.initial_critic_lr = critic_lr
@@ -210,14 +206,12 @@ class FLDDPG:
             param_group['lr'] = max(param_group['lr'], self.min_lr)
         self.current_critic_lr = self.critic_optimizer.param_groups[0]['lr']
         
-    def select_action(self, state, explore):
+    def select_action(self, state, explore, epsilon):
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
             if explore:
-                # Even the noise here is set to decay over time to lead to stability
-                action = self.actor.get_action_with_noise(state)
-                noise_scale = self.epsilon * np.random.normal(0, 1, size=action.shape)
-                self.epsilon = max(self.epsilon_decay*self.epsilon, self.min_epsilon)
+                action = self.actor.get_action(state)
+                noise_scale = epsilon * np.random.normal(0, 1, size=action.shape)
                 action = torch.clamp(action + torch.FloatTensor(noise_scale).to(self.device), -1, 1)
             else:
                 action = self.actor(state)

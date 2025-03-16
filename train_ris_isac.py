@@ -12,9 +12,6 @@ class RISISACTrainer:
 
         # Initialize MATLAB simulation
         self.sim = self.eng.RISISAC_V2X_Sim()
-        # print(self.eng.methods(self.sim))
-        # print(type(self.sim))
-        
         # Get state and action dimensions
         initial_state = self.eng.getState(self.sim)
         initial_state = np.array(initial_state).flatten()
@@ -147,10 +144,9 @@ class RISISACTrainer:
                     explore = True
                 else:
                     explore = False
-                epsilon_start = max(epsilon_en, epsilon_start*epsilon_decay_rate)
                 step_counter = step_counter + 1
                 # Select action with exploration
-                action = self.agent.select_action(state, explore)
+                action = self.agent.select_action(state, explore, epsilon_start)
                 
                 # Convert and execute action
                 matlab_action = matlab.double(action.tolist())
@@ -179,6 +175,7 @@ class RISISACTrainer:
                     episode_losses['critic'].append(critic_loss)
                 
                 state = next_state
+                epsilon_start = max(epsilon_en, epsilon_start*epsilon_decay_rate)
                 
                 if done:
                     prev_peb = current_peb
@@ -268,7 +265,7 @@ class RISISACTrainer:
             step = 0
             
             while not done and step < 200:
-                action = self.agent.select_action(state, explore=False)
+                action = self.agent.select_action(state, explore=False, epsilon=0.0)
                 matlab_action = matlab.double(action.tolist())
                 next_state, reward, done = self.eng.step(self.sim, matlab_action, nargout=3)
                 

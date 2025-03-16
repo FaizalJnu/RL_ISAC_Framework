@@ -96,15 +96,21 @@ classdef RISISAC_V2X_Sim < handle
 
             obj.h_nl = (sigma * complex(randn(1,1), randn(1,1))) + mu;
             
-            HLos = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nr, obj.Nb);
-            HNLos = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
+            [HLos,HLos_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nr, obj.Nb);
+            [HNLos,HNLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
             obj.H_combined = HLos + HNLos;
 
             [Wx,W] = computeWx(obj);
             % disp(W);
             obj.Pb = mean(sum(abs(Wx).^2, 1));
             % disp(['Pb: ' num2str(obj.Pb)]);
-            obj.gamma_c = obj.Pb * norm(obj.H_combined * W, 'fro')^2 / obj.sigma_c^2;
+            gamma_c_per_subcarrier = zeros(1, obj.Ns);
+            for n = 1:obj.Ns
+                H_combined_n = HLos_3d(:,:,n) + HNLos_3d(:,:,n);
+                gamma_c_per_subcarrier(n) = obj.Pb * norm(H_combined_n * W, 'fro')^2 / obj.sigma_c^2;
+            end
+            obj.gamma_c = mean(gamma_c_per_subcarrier);
+
             % disp(['gamma_c: ' num2str(obj.gamma_c)]);
             obj.SNR = log10(obj.gamma_c);
 
@@ -144,11 +150,20 @@ classdef RISISAC_V2X_Sim < handle
             psi_bt = angles.bs_to_target_transmit;
             psi_tb = angles.bs_to_target_receive;
             
+            % Get frequency-dependent steering vectors (dimensions: Nb×Ns and Nt×Ns)
             a_psi_bt = compute_a_psi(obj, Nb, psi_bt, lambda, d);
             a_psi_tb = compute_a_psi(obj, Nt, psi_tb, lambda, d);
             
-            H_bt = a_psi_tb * a_psi_bt';
+            % Initialize 3D channel matrix (Nt×Nb×Ns)
+            H_bt = zeros(Nt, Nb, obj.Ns);
+            
+            % Calculate H_bt for each subcarrier
+            for n = 1:obj.Ns
+                % Outer product of steering vectors for nth subcarrier
+                H_bt(:,:,n) = a_psi_tb(:,n) * a_psi_bt(:,n)';
+            end
         end
+        
 
         function [H_br, H_rt] = generate_H_br_H_rt(obj, Nb, Nr, Nt, angles, lambda, d, dr)
             % BS-RIS channel parameters
@@ -167,44 +182,108 @@ classdef RISISAC_V2X_Sim < handle
         end
 
         function H_br = generate_H_br(obj, Nr, Nb, phi_abr, phi_ebr, psi_br, lambda, dr, d)
+            % Get frequency-dependent steering vectors (dimensions: Nb×Ns and Nr×Ns)
             a_psi_br = compute_a_psi(obj, Nb, psi_br, lambda, d);
             a_phi_abr = compute_a_phi(obj, sqrt(Nr), phi_abr, phi_ebr, lambda, dr);
             
-            H_br = a_phi_abr * a_psi_br';
+            % Initialize 3D channel matrix (Nr×Nb×Ns)
+            H_br = zeros(Nr, Nb, obj.Ns);
+            
+            % Calculate H_br for each subcarrier
+            for n = 1:obj.Ns
+                % Outer product of steering vectors for nth subcarrier
+                H_br(:,:,n) = a_phi_abr(:,n) * a_psi_br(:,n)';
+            end
         end
         
+        
         function H_rt = generate_H_rt(obj, Nt, Nr, phi_art, phi_ert, psi_rt, lambda, dr, d)
+            % Get frequency-dependent steering vectors (dimensions: Nt×Ns and Nr×Ns)
             a_psi_rt = compute_a_psi(obj, Nt, psi_rt, lambda, d);
             a_phi_art = compute_a_phi(obj, sqrt(Nr), phi_art, phi_ert, lambda, dr);
             
-            H_rt = a_psi_rt * a_phi_art';
-        end
-
-        function a_vec = compute_a_psi(~, Nant, psi, lambda, d)
-            k = 2*pi/lambda;
-            n = 0:(Nant-1);
-            phase_terms = exp(1j * k * d * n * sin(psi));
-            a_vec = phase_terms(:) / sqrt(Nant);
+            % Initialize 3D channel matrix (Nt×Nr×Ns)
+            H_rt = zeros(Nt, Nr, obj.Ns);
+            
+            % Calculate H_rt for each subcarrier
+            for n = 1:obj.Ns
+                % Outer product of steering vectors for nth subcarrier
+                H_rt(:,:,n) = a_psi_rt(:,n) * a_phi_art(:,n)';
+            end
         end
         
-        function a_phi = compute_a_phi(~, Nx, phi_a, phi_e, lambda, dr)
-            N2 = Nx * Nx;
-            a_phi = zeros(N2, 1);
-            k = 2*pi/lambda;
+
+        % function a_vec = compute_a_psi(~, Nant, psi, lambda, d)
+        %     k = 2*pi/lambda;
+        %     n = 0:(Nant-1);
+        %     phase_terms = exp(1j * k * d * n * sin(psi));
+        %     a_vec = phase_terms(:) / sqrt(Nant);
+        % end
+        
+        % function a_phi = compute_a_phi(~, Nx, phi_a, phi_e, lambda, dr)
+        %     N2 = Nx * Nx;
+        %     a_phi = zeros(N2, 1);
+        %     k = 2*pi/lambda;
             
-            idx = 1;
-            for m = 1:Nx
-                for n = 1:Nx
-                    phase_term = exp(1j * k * dr * (m * sin(phi_a) * sin(phi_e) + n * cos(phi_e)));
-                    a_phi(idx) = phase_term;
-                    idx = idx + 1;
-                end
+        %     idx = 1;
+        %     for m = 1:Nx
+        %         for n = 1:Nx
+        %             phase_term = exp(1j * k * dr * (m * sin(phi_a) * sin(phi_e) + n * cos(phi_e)));
+        %             a_phi(idx) = phase_term;
+        %             idx = idx + 1;
+        %         end
+        %     end
+            
+        %     a_phi = a_phi / sqrt(N2);
+        % end
+
+        function a_vec = compute_a_psi(obj, Nant, psi, lambda, d)
+            Ns = obj.Ns; % Number of subcarriers
+            B = obj.B;   % Bandwidth (Hz)
+            fc = obj.fc; % Carrier frequency (Hz)
+            
+            n_ant = (0:(Nant-1)).'; % antenna indices (column vector)
+            a_vec = zeros(Nant, Ns); % Initialize output matrix
+            
+            for n = 1:Ns
+                % Frequency of nth subcarrier (assuming centered around fc)
+                f_n = fc + B*(n - (Ns+1)/2)/Ns;
+                k_n = 2*pi*f_n/(3e8); % wavenumber at frequency f_n
+                
+                phase_terms = exp(1j * k_n * d * n_ant * sin(psi));
+                a_vec(:, n) = phase_terms / sqrt(Nant);
             end
-            
-            a_phi = a_phi / sqrt(N2);
         end
 
-        function H_Los = generate_H_Los(obj, H_bt, Nt, ~, Nb)
+        function a_phi = compute_a_phi(obj, Nx, phi_a, phi_e, lambda, dr)
+            Ns = obj.Ns; % Number of subcarriers
+            B = obj.B;   % Bandwidth (Hz)
+            fc = obj.fc; % Carrier frequency (Hz)
+        
+            N2 = Nx * Nx;
+            a_phi = zeros(N2, Ns); % Initialize output matrix
+        
+            for n_subcarr = 1:Ns
+                % Frequency of nth subcarrier (assuming centered around fc)
+                f_n = fc + B*(n_subcarr - (Ns+1)/2)/Ns;
+                k_n = 2*pi*f_n/(3e8); % wavenumber at frequency f_n
+        
+                idx = 1;
+                for m_idx = 1:Nx
+                    for n_idx = 1:Nx
+                        phase_term = exp(1j * k_n * dr * ...
+                            (m_idx * sin(phi_a) * sin(phi_e) + n_idx * cos(phi_e)));
+                        a_phi(idx, n_subcarr) = phase_term;
+                        idx = idx + 1;
+                    end
+                end
+        
+                % Normalize per subcarrier
+                a_phi(:, n_subcarr) = a_phi(:, n_subcarr) / sqrt(N2);
+            end
+        end
+        
+        function [H_Los, H_Los_3d] = generate_H_Los(obj, H_bt, Nt, ~, Nb)
             K_dB = 4; 
             K = 10^(K_dB/10);
             sigma = sqrt(1/(2*(K+1)));
@@ -218,18 +297,26 @@ classdef RISISAC_V2X_Sim < handle
             [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters(obj);
             tau_l = delays.line_of_sight;
             
+            % Initialize 3D channel matrix (Nt×Nb×Ns)
             H_Los_3d = zeros(Nt, Nb, obj.Ns);
             
+            % Calculate H_Los for each subcarrier
             for n = 1:obj.Ns
+                % Calculate phase shift for nth subcarrier
                 phase = exp(1j*2*pi*obj.B*(n-1)*tau_l/obj.Ns);
-                H_Los_3d(:,:,n) = gamma_l * obj.h_l * H_bt * phase;  
+                
+                % H_bt is now a 3D matrix, so we use H_bt(:,:,n)
+                H_Los_3d(:,:,n) = gamma_l * obj.h_l * H_bt(:,:,n) * phase;
             end
-
-            H_Los = mean(H_Los_3d, 3);  % ! Nt × Nb matrix
+        
+            % Return both the 3D channel matrix and its average
+            H_Los = mean(H_Los_3d, 3);  % Average across subcarriers (Nt×Nb matrix)
         end
         
         
-        function H_NLoS = generate_H_NLoS(obj, H_rt, H_br, Nt, Nr, Nb)
+        
+        
+        function [H_NLoS, H_NLoS_3d] = generate_H_NLoS(obj, H_rt, H_br, Nt, Nr, Nb)
             K_dB = 4; 
             K = 10^(K_dB/10);
             sigma = sqrt(1/(2*(K+1)));
@@ -242,21 +329,29 @@ classdef RISISAC_V2X_Sim < handle
             
             [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters(obj);
             tau_nl = delays.non_line_of_sight;
-
+        
+            % Generate RIS phase shift matrix
             rho_r = 1;
             theta = 2*pi*rand(Nr,1);
             u = rho_r * exp(1j*theta);
             obj.phi = diag(u);
             
+            % Initialize 3D channel matrix (Nt×Nb×Ns)
             H_NLoS_3d = zeros(Nt, Nb, obj.Ns);
             
+            % Calculate H_NLoS for each subcarrier
             for n = 1:obj.Ns
                 phase = exp(1j*2*pi*obj.B*(n-1)*tau_nl/obj.Ns);
-                H_NLoS_3d(:,:,n) = gamma_nl * obj.h_nl * H_rt * obj.phi * H_br * phase;
+                
+                % Use the nth subcarrier slice from H_rt and H_br
+                % H_rt is Nt×Nr×Ns and H_br is Nr×Nb×Ns
+                H_NLoS_3d(:,:,n) = gamma_nl * obj.h_nl * H_rt(:,:,n) * obj.phi * H_br(:,:,n) * phase;
             end
             
-            H_NLoS = mean(H_NLoS_3d, 3);  % Nt × Nb matrix
-        end        
+            % Return both the 3D channel matrix and its average
+            H_NLoS = mean(H_NLoS_3d, 3);  % Average across subcarriers (Nt×Nb matrix)
+        end
+               
         
 
         % ! -------------------- CHANNEL INITIALIZATION PART ENDS HERE --------------------        
@@ -422,10 +517,6 @@ classdef RISISAC_V2X_Sim < handle
                 peb = peb * penalty_factor;
             end
             peb = sqrt((real(peb)^2) - (imag(peb)^2));
-            peb_cap = 12;
-            if peb>peb_cap
-                peb = peb_cap;
-            end
         end
         
         function [T] = computeTransformationMatrix(obj)
@@ -457,10 +548,58 @@ classdef RISISAC_V2X_Sim < handle
             N = obj.Ns;  
             W = rand(obj.Nb, obj.Mb) + 1j*randn(obj.Nb, obj.Mb);
             W = W ./ vecnorm(W); 
-            X = (randn(obj.Mb, N) + 1j*randn(obj.Mb, N)) / sqrt(2);
             
-            Wx = W * X;
+            % Initialize Wx with proper dimensions
+            Wx = zeros(obj.Nb, N);
+            
+            % Generate a different X for each subcarrier
+            for n = 1:N
+                X_n = (randn(obj.Mb, 1) + 1j*randn(obj.Mb, 1)) / sqrt(2);
+                Wx(:,n) = W * X_n;
+            end
         end
+        
+        function [Wx, W] = computeHybridWx(obj)
+            N = obj.Ns;  % Number of subcarriers
+            
+            % Define subarray structure
+            numSubarrays = 2;  % Number of subarrays (RF chains)
+            elementsPerSubarray = obj.Nb / numSubarrays;  % Elements per subarray
+            
+            % 1. Digital precoding matrix (baseband processing)
+            W_BB = rand(numSubarrays, obj.Mb) + 1j*randn(numSubarrays, obj.Mb);
+            W_BB = W_BB ./ vecnorm(W_BB);  % Normalize digital weights
+            
+            % 2. Analog beamforming matrix (RF domain with phase shifters)
+            W_RF = zeros(obj.Nb, numSubarrays);
+            
+            % Create analog beamforming matrix with phase-only constraints
+            for i = 1:numSubarrays
+                % Calculate which elements belong to this subarray
+                startIdx = (i-1)*elementsPerSubarray + 1;
+                endIdx = i*elementsPerSubarray;
+                
+                % Generate random phases (analog phase shifters can only change phase)
+                phases = 2*pi*rand(elementsPerSubarray, 1);
+                
+                % Set the phase shifters for this subarray (unit magnitude)
+                W_RF(startIdx:endIdx, i) = exp(1j*phases);
+            end
+            
+            % Combined hybrid beamforming matrix
+            W = W_RF * W_BB;
+            
+            % Initialize Wx with proper dimensions
+            Wx = zeros(obj.Nb, N);
+            
+            % Generate a different X for each subcarrier
+            for n = 1:N
+                X_n = (randn(obj.Mb, 1) + 1j*randn(obj.Mb, 1)) / sqrt(2);
+                
+                % Apply hybrid beamforming
+                Wx(:,n) = W * X_n;
+            end
+        end        
         
         function [J, Jzao, T] = computeFisherInformationMatrix(obj)
             sigma_s = sqrt(obj.SNR/obj.Pb);  % Noise variance (placeholder)
@@ -469,8 +608,8 @@ classdef RISISAC_V2X_Sim < handle
             gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
             gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
             
-            [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, obj.Nt, obj.B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
-            [Jzao] = calculateJacobianMatrix(obj, obj.Pb, sigma_s, obj.Nt, Wx, A1, A2, A3, A4);
+            [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, obj.Ns, obj.B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
+            [Jzao] = calculateJacobianMatrix(obj, obj.Pb, sigma_s, obj.Ns, Wx, A1, A2, A3, A4);
             
             % Compute final Fisher Information Matrix
             J = T * Jzao * T';
@@ -478,18 +617,25 @@ classdef RISISAC_V2X_Sim < handle
         
         function [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, N, B, gamma_l, gamma_nl, h_l, h_nl)
             [~, ~, ~, ~, ~, ~, delays, ~] = computeGeometricParameters(obj);
-            A3 = zeros(1,4);
-            A4 = zeros(1,4);
+            tau_l = delays.line_of_sight;
+            tau_nl = delays.non_line_of_sight;
+            A1 = zeros(1, N);
+            A2 = zeros(1, N);
+            A3 = zeros(1, N);
+            A4 = zeros(1, N);
             for n = 1:N
-                A3(:,n) = gamma_nl * h_nl * exp(1j * 2 * pi * B * (n/N) * delays.non_line_of_sight);
-                A4(:,n) = gamma_l * h_l * exp(1j * 2 * pi * B * (n/N) * delays.line_of_sight);
-            end
-            A1 = zeros(1,4);
-            A2 = zeros(1,4);
-            % Calculate A1 and A2 for each n
-            for n = 1:N
-                A1(:,n) = gamma_l * h_l * 1j * 2 * pi * exp(1j * 2 * pi * B * (n/N) * delays.line_of_sight);
-                A2(:,n) = gamma_nl * h_nl * 1j * 2 * pi * exp(1j * 2 * pi * B * (n/N) * delays.non_line_of_sight);
+                % Frequency-dependent scaling factor
+                freq_factor = (n / N);
+                
+                % Compute each amplitude matrix entry
+                A1(n) = gamma_l * h_l * (1j * 2 * pi * B * freq_factor) * ...
+                        exp(1j * 2 * pi * B * freq_factor * tau_l);
+                A2(n) = gamma_nl * h_nl * (1j * 2 * pi * B * freq_factor) * ...
+                        exp(1j * 2 * pi * B * freq_factor * tau_nl);
+                A3(n) = gamma_nl * h_nl * ...
+                        exp(1j * 2 * pi * B * freq_factor * tau_nl);
+                A4(n) = gamma_l * h_l * ...
+                        exp(1j * 2 * pi * B * freq_factor * tau_l);
             end
         end 
 
@@ -506,16 +652,36 @@ classdef RISISAC_V2X_Sim < handle
             phi_br_a = angles.bs_to_ris.elevation_azimuth;
             phi_br_e = angles.bs_to_ris.elevation_angle;
 
-            indices = 1:(obj.Nt);
-            a_rt = 1j * (2 * pi / obj.lambda) * cos(psi_rt) * diag(indices);
-            indices = 1:(obj.Nb);
-            a_bt = 1j * (2 * pi / obj.lambda) * cos(psi_bt) * diag(indices);
-            indices = 1:(obj.Nt);
-            a_tb = 1j * (2 * pi / obj.lambda) * cos(psi_bt) * diag(indices);
+            % Initialize a_rt with proper dimensions
+            % Initialize a_rt, a_bt, and a_tb with proper dimensions
+            a_rt = zeros(obj.Nt, obj.Ns);
+            a_bt = zeros(obj.Nb, obj.Ns);
+            a_tb = zeros(obj.Nt, obj.Ns);
 
-            a_rt_a = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * ((obj.Nx-1) * cos(phi_rt_a) * sin(phi_rt_e));
-            a_rt_e = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * (((obj.Nx-1) * sin(phi_rt_a) * cos(phi_rt_e)) - ((obj.Ny-1) * sin(phi_rt_e)));
-            
+            % Calculate for each subcarrier
+            for n = 1:obj.Ns
+                % For a_rt - we need a column vector, not a diagonal matrix
+                indices = (0:(obj.Nt-1))';  % Column vector of indices
+                a_rt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_rt) * indices;
+                
+                % For a_bt
+                indices_b = (0:(obj.Nb-1))';
+                a_bt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_bt) * indices_b;
+                
+                % For a_tb
+                a_tb(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_tb) * indices;
+            end
+
+            % Initialize arrays for a_rt_a and a_rt_e
+            a_rt_a = zeros(obj.Nr, obj.Ns);
+            a_rt_e = zeros(obj.Nr, obj.Ns);
+
+            % Calculate a_rt_a and a_rt_e for each subcarrier
+            for n = 1:obj.Ns
+                a_rt_a(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * ((obj.Nx-1) * cos(phi_rt_a) * sin(phi_rt_e));
+                a_rt_e(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * (((obj.Nx-1) * sin(phi_rt_a) * cos(phi_rt_e)) - ((obj.Ny-1) * sin(phi_rt_e)));
+            end
+
             % TODO: implement all the a vector
             a_vec = compute_a_psi(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2);
             a_psi_bt = a_vec;
@@ -530,57 +696,122 @@ classdef RISISAC_V2X_Sim < handle
             % TODO: implement all the steering vector
             a_phi_br = compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2);
             a_phi_rt = compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, obj.lambda, obj.lambda/2);
+            % A3_expanded = repmat(A3, size(a_rt, 1), 1);
 
+            % Before the loop, check dimensions
+            % disp(['a_psi_bt size: ', num2str(size(a_psi_bt))]);
+            % disp(['a_psi_tb size: ', num2str(size(a_psi_tb))]);
+            % disp(['a_psi_rt size: ', num2str(size(a_psi_rt))]);
+            % disp(['a_psi_br size: ', num2str(size(a_psi_br))]);
+            % disp(['a_phi_rt size: ', num2str(size(a_phi_rt))]);
+            % disp(['a_phi_br size: ', num2str(size(a_phi_br))]);
+            % disp(['A1 size: ', num2str(size(A1))]);
+            % disp(['Wx size: ', num2str(size(Wx))]);
+            % Calculate partial derivatives for each n
             % Calculate partial derivatives for each n
             for n = 1:N
                 % Calculate all partial derivatives
                 d_mu_array = cell(7, 1);
                 
+                % Extract the nth column from each steering vector matrix
+                a_psi_bt_n = a_psi_bt(:,n);
+                a_psi_tb_n = a_psi_tb(:,n);
+                a_psi_rt_n = a_psi_rt(:,n);
+                a_psi_br_n = a_psi_br(:,n);
+                a_phi_rt_n = a_phi_rt(:,n);
+                a_phi_br_n = a_phi_br(:,n);
+                
+                % Extract the nth element from amplitude matrices
+                A1_n = A1(n);
+                A2_n = A2(n);
+                A3_n = A3(n);
+                A4_n = A4(n);
+                
                 % Partial derivatives with respect to each parameter
-                d_mu_array{1} = (A1 * a_psi_bt) * (a_psi_tb' * Wx(:,n));  % d_mu_d_tau
+                % d_mu_d_tau_l
+                d_mu_array{1} = (A1_n * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
                 
-                d_mu_array{2} = (A2 * a_psi_rt) * ...
-                    (a_phi_rt' * ...          % d_mu_d_tau_rt
-                    obj.phi * a_phi_br) * ...
-                    (a_psi_br' * ...
-                    Wx(:,n));
+                % d_mu_d_tau_nl
+                d_mu_array{2} = (A2_n * a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
                 
-                d_mu_array{3} = (A3 * a_rt * a_psi_rt) * ...
-                    (a_phi_rt' * ...          % d_mu_d_psi_rt
-                    obj.phi * a_phi_br) * ...
-                    (a_psi_br' * Wx(:,n));
+                d_mu_array{3} = A3_n * (a_rt(:,n) .* a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
+
+                % d_mu_d_phi_rt_a
+                d_mu_array{4} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_a(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
                 
-                d_mu_array{4} = (A3 * a_psi_rt) * ...
-                    (a_phi_rt' * ...          % d_mu_d_phi_a
-                    diag(a_rt_a) * ...
-                    obj.phi * a_phi_br) * ...
-                    (a_psi_br' * Wx(:,n));
+                % d_mu_d_phi_rt_e
+                d_mu_array{5} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_e(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
                 
-                d_mu_array{5} = (A3 * a_psi_rt) * ...
-                    (a_phi_rt' * ...          % d_mu_d_phi_e
-                    diag(a_rt_e) * ...
-                    obj.phi * a_phi_br)* ...
-                        (a_psi_br' * Wx(:,n));
+                % d_mu_d_psi_br
+                d_mu_array{6} = (A4_n * a_bt(:,n)' * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
                 
-                d_mu_array{6} = (A4 * a_bt' * a_psi_bt) * ...   % d_mu_d_psi_br
-                    (a_psi_tb' * Wx(:,n));
-            
-                d_mu_array{7} = (A4 * a_tb * a_psi_bt) * ... 
-                    (a_psi_tb' * ...   % d_mu_d_psi_bt
-                    Wx(:,n));
-                
+                d_mu_array{7} = A4_n * (a_tb(:,n) .* a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
+
                 % Calculate Jacobian matrix elements
                 for i = 1:7
                     for j = 1:7
-
-                        J_zao(i,j) = J_zao(i,j) + real(d_mu_array{i}' * d_mu_array{j});
+                        % Get the sizes of the current derivatives
+                        [rows_i, cols_i] = size(d_mu_array{i});
+                        [rows_j, cols_j] = size(d_mu_array{j});
+                        
+                        % Compute the FIM entry based on dimensions
+                        if rows_i == rows_j && cols_i == cols_j
+                            % If dimensions match, use dot product
+                            J_zao(i,j) = J_zao(i,j) + real(sum(sum(conj(d_mu_array{i}) .* d_mu_array{j})));
+                        else
+                            % For mismatched dimensions, reshape or use other approaches
+                            % For example, if one is scalar and one is vector:
+                            if rows_i*cols_i == 1 || rows_j*cols_j == 1
+                                % If either is scalar, simple multiplication works
+                                J_zao(i,j) = J_zao(i,j) + real(sum(sum(d_mu_array{i} * d_mu_array{j}')));
+                            else
+                                % For other cases, you might need custom handling
+                                J_zao(i,j) = J_zao(i,j) + real(sum(sum(d_mu_array{i} * d_mu_array{j}')));
+                            end
+                        end
                     end
-                end
+                end                
             end
-            % Apply scaling factor
-            % J_zao = (2 * Pb / (sigma^2)) * J_zao;
+ 
+        end                 
+
+        % function J_zeta = computeFIM(N, P_b, sigma_s2, Wx_n, A_matrices, psi_params)
             
-        end
+        %     % Initialize Fisher Information Matrix
+        %     J_zeta = zeros(7, 7);
+            
+        %     % Loop over subcarriers
+        %     for n = 1:N
+        %         % Compute derivatives for each parameter
+        %         d_mu_array = computeDerivatives(Wx_n(:,n), A_matrices, psi_params);
+                
+        %         % Update FIM entries
+        %         for i = 1:7
+        %             for j = 1:7
+        %                 J_zeta(i,j) = J_zeta(i,j) + real(d_mu_array{i}' * d_mu_array{j});
+        %             end
+        %         end
+        %     end
+            
+        %     % Scale by power and noise variance
+        %     J_zeta = (2 * P_b / sigma_s2) * J_zeta;
+        % end
+        
+        % function d_mu_array = computeDerivatives(Wx_n, A_matrices, psi_params)
+        %     % Compute partial derivatives of mu w.r.t. each parameter in zeta
+            
+        %     d_mu_array = cell(7, 1); % Store derivatives for each parameter
+            
+        %     % Example derivative calculations (expand for all parameters)
+        %     d_mu_array{1} = sum((A_matrices.A1 .* psi_params.a_bt_in) .* ...
+        %                         (psi_params.a_bt_out' * Wx_n), 2);
+            
+        %     d_mu_array{2} = sum((A_matrices.A2 .* psi_params.a_rt_in) .* ...
+        %                         (psi_params.a_rt_out' * Wx_n), 2);
+            
+        %     % Add other derivatives based on Equation (45)
+        % end
+        
         % ! -------------------- PEB COMPUTATION PART ENDS HERE --------------------        
 
     end
