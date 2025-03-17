@@ -102,7 +102,7 @@ classdef RISISAC_V2X_Sim < handle
 
             [Wx,W] = computeWx(obj);
             % disp(W);
-            obj.Pb = mean(sum(abs(Wx).^2, 1));
+            obj.Pb = getpower(obj);
             % disp(['Pb: ' num2str(obj.Pb)]);
             gamma_c_per_subcarrier = zeros(1, obj.Ns);
             for n = 1:obj.Ns
@@ -117,6 +117,11 @@ classdef RISISAC_V2X_Sim < handle
             obj.rate = getrate(obj);
             obj.cc = obj.B * log2(1+obj.SNR);
             obj.R_min = obj.B*60;
+        end
+
+        function Pb = getpower(obj)
+            Wx = computeWx(obj); 
+            Pb = mean(sum(abs(Wx).^2, 1));
         end
 
         function rate = getrate(obj)
@@ -211,31 +216,6 @@ classdef RISISAC_V2X_Sim < handle
                 H_rt(:,:,n) = a_psi_rt(:,n) * a_phi_art(:,n)';
             end
         end
-        
-
-        % function a_vec = compute_a_psi(~, Nant, psi, lambda, d)
-        %     k = 2*pi/lambda;
-        %     n = 0:(Nant-1);
-        %     phase_terms = exp(1j * k * d * n * sin(psi));
-        %     a_vec = phase_terms(:) / sqrt(Nant);
-        % end
-        
-        % function a_phi = compute_a_phi(~, Nx, phi_a, phi_e, lambda, dr)
-        %     N2 = Nx * Nx;
-        %     a_phi = zeros(N2, 1);
-        %     k = 2*pi/lambda;
-            
-        %     idx = 1;
-        %     for m = 1:Nx
-        %         for n = 1:Nx
-        %             phase_term = exp(1j * k * dr * (m * sin(phi_a) * sin(phi_e) + n * cos(phi_e)));
-        %             a_phi(idx) = phase_term;
-        %             idx = idx + 1;
-        %         end
-        %     end
-            
-        %     a_phi = a_phi / sqrt(N2);
-        % end
 
         function a_vec = compute_a_psi(obj, Nant, psi, lambda, d)
             Ns = obj.Ns; % Number of subcarriers
@@ -544,22 +524,24 @@ classdef RISISAC_V2X_Sim < handle
             T(2,7) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
         end
         
-        function [Wx, W] = computeWx(obj)
-            N = obj.Ns;  
-            W = rand(obj.Nb, obj.Mb) + 1j*randn(obj.Nb, obj.Mb);
-            W = W ./ vecnorm(W); 
+        % ! Don't remove this
+        % function [Wx, W] = computeWx(obj)
+        %     N = obj.Ns;  
+        %     W = rand(obj.Nb, obj.Mb) + 1j*randn(obj.Nb, obj.Mb);
+        %     W = W ./ vecnorm(W); 
             
-            % Initialize Wx with proper dimensions
-            Wx = zeros(obj.Nb, N);
+        %     % Initialize Wx with proper dimensions
+        %     Wx = zeros(obj.Nb, N);
             
-            % Generate a different X for each subcarrier
-            for n = 1:N
-                X_n = (randn(obj.Mb, 1) + 1j*randn(obj.Mb, 1)) / sqrt(2);
-                Wx(:,n) = W * X_n;
-            end
-        end
+        %     % Generate a different X for each subcarrier
+        %     for n = 1:N
+        %         X_n = (randn(obj.Mb, 1) + 1j*randn(obj.Mb, 1)) / sqrt(2);
+        %         Wx(:,n) = W * X_n;
+        %     end
+        % end
         
-        function [Wx, W] = computeHybridWx(obj)
+        % ! Don't remove this either
+        function [Wx, W] = computeWx(obj)
             N = obj.Ns;  % Number of subcarriers
             
             % Define subarray structure
@@ -696,19 +678,7 @@ classdef RISISAC_V2X_Sim < handle
             % TODO: implement all the steering vector
             a_phi_br = compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2);
             a_phi_rt = compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, obj.lambda, obj.lambda/2);
-            % A3_expanded = repmat(A3, size(a_rt, 1), 1);
 
-            % Before the loop, check dimensions
-            % disp(['a_psi_bt size: ', num2str(size(a_psi_bt))]);
-            % disp(['a_psi_tb size: ', num2str(size(a_psi_tb))]);
-            % disp(['a_psi_rt size: ', num2str(size(a_psi_rt))]);
-            % disp(['a_psi_br size: ', num2str(size(a_psi_br))]);
-            % disp(['a_phi_rt size: ', num2str(size(a_phi_rt))]);
-            % disp(['a_phi_br size: ', num2str(size(a_phi_br))]);
-            % disp(['A1 size: ', num2str(size(A1))]);
-            % disp(['Wx size: ', num2str(size(Wx))]);
-            % Calculate partial derivatives for each n
-            % Calculate partial derivatives for each n
             for n = 1:N
                 % Calculate all partial derivatives
                 d_mu_array = cell(7, 1);
@@ -773,45 +743,7 @@ classdef RISISAC_V2X_Sim < handle
                 end                
             end
  
-        end                 
-
-        % function J_zeta = computeFIM(N, P_b, sigma_s2, Wx_n, A_matrices, psi_params)
-            
-        %     % Initialize Fisher Information Matrix
-        %     J_zeta = zeros(7, 7);
-            
-        %     % Loop over subcarriers
-        %     for n = 1:N
-        %         % Compute derivatives for each parameter
-        %         d_mu_array = computeDerivatives(Wx_n(:,n), A_matrices, psi_params);
-                
-        %         % Update FIM entries
-        %         for i = 1:7
-        %             for j = 1:7
-        %                 J_zeta(i,j) = J_zeta(i,j) + real(d_mu_array{i}' * d_mu_array{j});
-        %             end
-        %         end
-        %     end
-            
-        %     % Scale by power and noise variance
-        %     J_zeta = (2 * P_b / sigma_s2) * J_zeta;
-        % end
-        
-        % function d_mu_array = computeDerivatives(Wx_n, A_matrices, psi_params)
-        %     % Compute partial derivatives of mu w.r.t. each parameter in zeta
-            
-        %     d_mu_array = cell(7, 1); % Store derivatives for each parameter
-            
-        %     % Example derivative calculations (expand for all parameters)
-        %     d_mu_array{1} = sum((A_matrices.A1 .* psi_params.a_bt_in) .* ...
-        %                         (psi_params.a_bt_out' * Wx_n), 2);
-            
-        %     d_mu_array{2} = sum((A_matrices.A2 .* psi_params.a_rt_in) .* ...
-        %                         (psi_params.a_rt_out' * Wx_n), 2);
-            
-        %     % Add other derivatives based on Equation (45)
-        % end
-        
+        end                         
         % ! -------------------- PEB COMPUTATION PART ENDS HERE --------------------        
 
     end

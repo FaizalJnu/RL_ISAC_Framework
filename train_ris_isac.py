@@ -3,6 +3,7 @@ import numpy as np
 from ddpg import FLDDPG  # Import our DDPG implementation
 import torch
 import matplotlib.pyplot as plt
+import os
 
 class RISISACTrainer:
     def __init__(self):
@@ -62,6 +63,11 @@ class RISISACTrainer:
     
     def save_checkpoint(self, episode, metrics, checkpoint_type='best_peb'):
         """Save model checkpoint with detailed metrics"""
+        # Create models directory if it doesn't exist
+        models_folder = 'models'
+        if not os.path.exists(models_folder):
+            os.makedirs(models_folder)
+        
         checkpoint = {
             'episode': episode,
             'actor_state_dict': self.agent.actor.state_dict(),
@@ -70,7 +76,11 @@ class RISISACTrainer:
             'critic_optimizer': self.agent.critic_optimizer.state_dict(),
             'metrics': metrics
         }
-        torch.save(checkpoint, f'{checkpoint_type}_model.pth')
+        
+        # Save to the models folder with appropriate filename
+        filepath = os.path.join(models_folder, f'{checkpoint_type}_model.pth')
+        torch.save(checkpoint, filepath)
+
     
     def plot_training_progress(self):
         """Plot training metrics"""
@@ -122,6 +132,8 @@ class RISISACTrainer:
         prev_peb = 12
         avg_rate = []
         rate_values = [[] for _ in range(300)]
+        power_values = [[] for _ in range(300)]
+        avg_power = []
         for episode in range(num_episodes):
             # Reset environment
             matlab_state = self.eng.reset(self.sim)
@@ -154,6 +166,7 @@ class RISISACTrainer:
                 next_matlab_state, reward, done = self.eng.step(self.sim, matlab_action, nargout=3)
                 current_peb = float(self.eng.calculatePerformanceMetrics(self.sim))
                 rate_values[episode].append(float(self.eng.getrate(self.sim)))
+                power_values[episode].append(float(self.eng.getpower(self.sim)))
                 peb_ae[episode].append(current_peb)
                 # Track PEB values
                 peb_values_in_episode.append(current_peb)
@@ -186,6 +199,7 @@ class RISISACTrainer:
             avg_peb_in_episode = sum(peb_values_in_episode) / len(peb_values_in_episode)
             last_peb_in_episode = current_peb
             avg_rate = np.mean(rate_values[episode])
+            avg_power = np.mean(power_values[episode])
             
             # Normalize reward
             episode_reward = episode_reward/step_counter
@@ -198,7 +212,8 @@ class RISISACTrainer:
                     'max_peb_values': [],
                     'avg_peb_values': [],
                     'last_peb_values': [],
-                    'avg_rate': []
+                    'avg_rate': [],
+                    'avg_power': []
                 })
             
             self.metrics['initial_peb_values'].append(initial_peb)
@@ -208,6 +223,7 @@ class RISISACTrainer:
             self.metrics['last_peb_values'].append(last_peb_in_episode)
             self.metrics['episode_rewards'].append(episode_reward)
             self.metrics['avg_rate'].append(avg_rate)
+            self.metrics['avg_power'].append(avg_power)
 
             self.metrics['peb_values'].append(current_peb)  # For backward compatibility
             if episode_losses['actor']:
@@ -318,13 +334,14 @@ if __name__ == "__main__":
         # plt.ylabel('PEB')
         # plt.legend()
         
+        plt_folder = 'plots'
         # Plot training rewards
         plt.figure(figsize=(10, 5))
         plt.plot(episodes, rewards)
         plt.title('Training Rewards')
         plt.xlabel('Episode')
         plt.ylabel('Reward')
-        plt.savefig('training_rewards.png')
+        plt.savefig(os.path.join(plt_folder,'training_rewards.png'))
         plt.show()
         
         plt.figure(figsize=(10, 5))
@@ -333,7 +350,7 @@ if __name__ == "__main__":
         plt.xlabel('Episode')
         plt.ylabel('PEB Value')
         plt.grid(True)
-        plt.savefig('peb_values.png')
+        plt.savefig(os.path.join(plt_folder,'peb_values.png'))
         plt.show()
         
         plt.figure(figsize=(10,5))
@@ -342,7 +359,16 @@ if __name__ == "__main__":
         plt.xlabel('Episode')
         plt.ylabel('Rate(Bits/s/hz)')
         plt.grid(True)
-        plt.savefig('Rate_per_episode')
+        plt.savefig(os.path.join(plt_folder,'Rate_per_episode'))
+        plt.show()
+
+        plt.figure(figsize=(10,5))
+        plt.plot(episodes, metrics['avg_power'])
+        plt.title('Average power per episode')
+        plt.xlabel('Episode')
+        plt.ylabel('Power(db)')
+        plt.grid(True)
+        plt.savefig(os.path.join(plt_folder,'Hybrid_power_per_episode'))
         plt.show()
 
     finally:
