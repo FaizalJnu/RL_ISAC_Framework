@@ -525,51 +525,10 @@ classdef RISISAC_V2X_Sim < handle
         end
         
         % ! Don't remove this
-        % function [Wx, W] = computeWx(obj)
-        %     N = obj.Ns;  
-        %     W = rand(obj.Nb, obj.Mb) + 1j*randn(obj.Nb, obj.Mb);
-        %     W = W ./ vecnorm(W); 
-            
-        %     % Initialize Wx with proper dimensions
-        %     Wx = zeros(obj.Nb, N);
-            
-        %     % Generate a different X for each subcarrier
-        %     for n = 1:N
-        %         X_n = (randn(obj.Mb, 1) + 1j*randn(obj.Mb, 1)) / sqrt(2);
-        %         Wx(:,n) = W * X_n;
-        %     end
-        % end
-        
-        % ! Don't remove this either
         function [Wx, W] = computeWx(obj)
-            N = obj.Ns;  % Number of subcarriers
-            
-            % Define subarray structure
-            numSubarrays = 2;  % Number of subarrays (RF chains)
-            elementsPerSubarray = obj.Nb / numSubarrays;  % Elements per subarray
-            
-            % 1. Digital precoding matrix (baseband processing)
-            W_BB = rand(numSubarrays, obj.Mb) + 1j*randn(numSubarrays, obj.Mb);
-            W_BB = W_BB ./ vecnorm(W_BB);  % Normalize digital weights
-            
-            % 2. Analog beamforming matrix (RF domain with phase shifters)
-            W_RF = zeros(obj.Nb, numSubarrays);
-            
-            % Create analog beamforming matrix with phase-only constraints
-            for i = 1:numSubarrays
-                % Calculate which elements belong to this subarray
-                startIdx = (i-1)*elementsPerSubarray + 1;
-                endIdx = i*elementsPerSubarray;
-                
-                % Generate random phases (analog phase shifters can only change phase)
-                phases = 2*pi*rand(elementsPerSubarray, 1);
-                
-                % Set the phase shifters for this subarray (unit magnitude)
-                W_RF(startIdx:endIdx, i) = exp(1j*phases);
-            end
-            
-            % Combined hybrid beamforming matrix
-            W = W_RF * W_BB;
+            N = obj.Ns;  
+            W = rand(obj.Nb, obj.Mb) + 1j*randn(obj.Nb, obj.Mb);
+            W = W ./ vecnorm(W); 
             
             % Initialize Wx with proper dimensions
             Wx = zeros(obj.Nb, N);
@@ -577,11 +536,52 @@ classdef RISISAC_V2X_Sim < handle
             % Generate a different X for each subcarrier
             for n = 1:N
                 X_n = (randn(obj.Mb, 1) + 1j*randn(obj.Mb, 1)) / sqrt(2);
-                
-                % Apply hybrid beamforming
                 Wx(:,n) = W * X_n;
             end
-        end        
+        end
+        
+        % ! Don't remove this either
+        % function [Wx, W] = computeWx(obj)
+        %     N = obj.Ns;  % Number of subcarriers
+            
+        %     % Define subarray structure
+        %     numSubarrays = 2;  % Number of subarrays (RF chains)
+        %     elementsPerSubarray = obj.Nb / numSubarrays;  % Elements per subarray
+            
+        %     % 1. Digital precoding matrix (baseband processing)
+        %     W_BB = rand(numSubarrays, obj.Mb) + 1j*randn(numSubarrays, obj.Mb);
+        %     W_BB = W_BB ./ vecnorm(W_BB);  % Normalize digital weights
+            
+        %     % 2. Analog beamforming matrix (RF domain with phase shifters)
+        %     W_RF = zeros(obj.Nb, numSubarrays);
+            
+        %     % Create analog beamforming matrix with phase-only constraints
+        %     for i = 1:numSubarrays
+        %         % Calculate which elements belong to this subarray
+        %         startIdx = (i-1)*elementsPerSubarray + 1;
+        %         endIdx = i*elementsPerSubarray;
+                
+        %         % Generate random phases (analog phase shifters can only change phase)
+        %         phases = 2*pi*rand(elementsPerSubarray, 1);
+                
+        %         % Set the phase shifters for this subarray (unit magnitude)
+        %         W_RF(startIdx:endIdx, i) = exp(1j*phases);
+        %     end
+            
+        %     % Combined hybrid beamforming matrix
+        %     W = W_RF * W_BB;
+            
+        %     % Initialize Wx with proper dimensions
+        %     Wx = zeros(obj.Nb, N);
+            
+        %     % Generate a different X for each subcarrier
+        %     for n = 1:N
+        %         X_n = (randn(obj.Mb, 1) + 1j*randn(obj.Mb, 1)) / sqrt(2);
+                
+        %         % Apply hybrid beamforming
+        %         Wx(:,n) = W * X_n;
+        %     end
+        % end        
         
         function [J, Jzao, T] = computeFisherInformationMatrix(obj)
             sigma_s = sqrt(obj.SNR/obj.Pb);  % Noise variance (placeholder)
