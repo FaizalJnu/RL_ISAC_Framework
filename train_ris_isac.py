@@ -163,10 +163,10 @@ class RISISACTrainer:
                 # Convert and execute action
                 matlab_action = matlab.double(action.tolist())
                 
-                next_matlab_state, reward, done = self.eng.step(self.sim, matlab_action, nargout=3)
-                current_peb = float(self.eng.calculatePerformanceMetrics(self.sim))
-                rate_values[episode].append(float(self.eng.getrate(self.sim)))
-                power_values[episode].append(float(self.eng.getpower(self.sim)))
+                # current_peb = float(self.eng.calculatePerformanceMetrics(self.sim))
+                next_matlab_state, reward, current_peb, rate, power, done = self.eng.step(self.sim, matlab_action, nargout=6)
+                rate_values[episode].append(float(rate))
+                power_values[episode].append(float(power))
                 peb_ae[episode].append(current_peb)
                 # Track PEB values
                 peb_values_in_episode.append(current_peb)
@@ -253,11 +253,11 @@ class RISISACTrainer:
                 print(f"\nEpisode {episode + 1}/{num_episodes}")
                 print(f"Reward: {episode_reward:.3f}")
                 print(f"Initial PEB: {initial_peb:.6f}")
-                print(f"Min PEB: {min_peb_in_episode:.6f}")
-                print(f"Max PEB: {max_peb_in_episode:.6f}")
-                print(f"Avg PEB: {avg_peb_in_episode:.6f}")
+                # print(f"Min PEB: {min_peb_in_episode:.6f}")
+                # print(f"Max PEB: {max_peb_in_episode:.6f}")
+                # print(f"Avg PEB: {avg_peb_in_episode:.6f}")
                 print(f"Last PEB: {last_peb_in_episode:.6f}")
-                print(f"Best PEB (all episodes): {self.best_metrics['peb']:.6f}")
+                # print(f"Best PEB (all episodes): {self.best_metrics['peb']:.6f}")
                 print(f"Learning Rate: {self.agent.current_actor_lr:.6f}")
                 print(f"Buffer Size: {len(self.agent.replay_buffer)}")
                 print(f"Decay rate is: {decay_rate}")
@@ -342,16 +342,16 @@ if __name__ == "__main__":
         plt.xlabel('Episode')
         plt.ylabel('Reward')
         plt.savefig(os.path.join(plt_folder,'training_rewards.png'))
-        plt.show()
+        # plt.show()
         
         plt.figure(figsize=(10, 5))
-        plt.plot(episodes, metrics['min_peb_values'])
+        plt.plot(episodes, metrics['last_peb_values'])
         plt.title('Performance Error Bound (PEB) over Episodes')
         plt.xlabel('Episode')
         plt.ylabel('PEB Value')
         plt.grid(True)
         plt.savefig(os.path.join(plt_folder,'peb_values.png'))
-        plt.show()
+        # plt.show()
         
         plt.figure(figsize=(10,5))
         plt.plot(episodes, metrics['avg_rate'])
@@ -360,7 +360,7 @@ if __name__ == "__main__":
         plt.ylabel('Rate(Bits/s/hz)')
         plt.grid(True)
         plt.savefig(os.path.join(plt_folder,'Rate_per_episode'))
-        plt.show()
+        # plt.show()
 
         plt.figure(figsize=(10,5))
         plt.plot(episodes, metrics['avg_power'])
@@ -369,7 +369,7 @@ if __name__ == "__main__":
         plt.ylabel('Power(db)')
         plt.grid(True)
         plt.savefig(os.path.join(plt_folder,'Hybrid_power_per_episode'))
-        plt.show()
+        # plt.show()
 
     finally:
         # Clean up

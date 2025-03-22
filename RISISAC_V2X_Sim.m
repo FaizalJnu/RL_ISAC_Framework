@@ -49,6 +49,9 @@ classdef RISISAC_V2X_Sim < handle
         time = 0;
         arrival_threshold = 10
 
+        minpeb = 10000;
+        peb = 0;
+
         % Channel matrices
         H_bt      % Direct channel
         H_br     % BS-RIS channel
@@ -354,32 +357,32 @@ classdef RISISAC_V2X_Sim < handle
             ];
             state = real(state);
             state = state(:)';
-
         end
 
-        function [next_state, reward, done] = step(obj, action)
+        function [next_state, reward, peb, rate, power, done] = step(obj, action)
             ris_phases = action(1:obj.Nr);
             obj.phi = diag(exp(1j * 2 * pi * ris_phases));
+
             [peb] = obj.calculatePerformanceMetrics();
+            rate = getrate(obj);
+            power = getpower(obj);
+            reward = obj.computeReward(peb);
+            reward = sqrt((real(reward)^2) - (imag(reward)^2));
 
             direction = (obj.destination - obj.car_loc) / norm(obj.destination - obj.car_loc);
             obj.car_loc = obj.car_loc + direction * obj.speed * obj.dt;
             obj.time = obj.time + obj.dt;
             
             obj.target_loc = obj.car_loc;
-            
-            [~,~,~,~,~,~,~,~] = computeGeometricParameters(obj);
             obj.stepCount = obj.stepCount + 1;
             
-            next_state = getState(obj);
             
-            reward = obj.computeReward(peb);
-            reward = sqrt((real(reward)^2) - (imag(reward)^2));
             destination_reached = norm(obj.car_loc - obj.destination) < obj.arrival_threshold;
             out_of_bounds = checkOutOfBounds(obj);
             timeout = obj.stepCount >= obj.maxSteps;
-            
             done = destination_reached || out_of_bounds || timeout;
+            
+            next_state = getState(obj);
         end
 
         function out_of_bounds = checkOutOfBounds(obj)
@@ -489,14 +492,20 @@ classdef RISISAC_V2X_Sim < handle
         function [peb] = calculatePerformanceMetrics(obj)
             [J, ~, ~] = computeFisherInformationMatrix(obj);
             CRLB = inv(J);
-            peb = sqrt(trace(CRLB));
+            obj.peb = sqrt(trace(CRLB));
             rate_constraint_satisfied = (obj.rate >= obj.R_min);
 
             if ~rate_constraint_satisfied
                 penalty_factor = 1 + (obj.R_min - obj.rate)/obj.R_min;
-                peb = peb * penalty_factor;
+                obj.peb = obj.peb * penalty_factor;
             end
-            peb = sqrt((real(peb)^2) - (imag(peb)^2));
+            obj.peb = sqrt((real(obj.peb)^2) - (imag(obj.peb)^2))*100;
+            % if(obj.peb < obj.minpeb)
+            %     obj.minpeb = obj.peb;
+            % else
+            %     obj.peb = obj.minpeb;
+            % end
+            peb = obj.peb;
         end
         
         function [T] = computeTransformationMatrix(obj)
