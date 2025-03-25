@@ -873,15 +873,7 @@ classdef RISISAC_V2X_Sim < handle
                             % If dimensions match, use dot product
                             J_zao(i,j) = J_zao(i,j) + real(sum(sum(conj(d_mu_array{i}) .* d_mu_array{j})));
                         else
-                            % For mismatched dimensions, reshape or use other approaches
-                            % For example, if one is scalar and one is vector:
-                            if rows_i*cols_i == 1 || rows_j*cols_j == 1
-                                % If either is scalar, simple multiplication works
-                                J_zao(i,j) = J_zao(i,j) + real(sum(sum(d_mu_array{i} * d_mu_array{j}')));
-                            else
-                                % For other cases, you might need custom handling
-                                J_zao(i,j) = J_zao(i,j) + real(sum(sum(d_mu_array{i} * d_mu_array{j}')));
-                            end
+                            J_zao(i,j) = J_zao(i,j) + real(sum(sum(d_mu_array{i} * d_mu_array{j}')));
                         end
                     end
                 end                
