@@ -48,6 +48,10 @@ classdef RISISAC_V2X_Sim < handle
         destination;
         time = 0;
         arrival_threshold = 10
+        car_orientation = 0
+        current_speed = 0
+        integral_error = 0
+        prev_error = 0
 
         minpeb = 10000;
         peb = 0;
@@ -359,31 +363,121 @@ classdef RISISAC_V2X_Sim < handle
             state = state(:)';
         end
 
+        % function [next_state, reward, peb, rate, power, done] = step(obj, action)
+        %     ris_phases = action(1:obj.Nr);
+        %     obj.phi = diag(exp(1j * 2 * pi * ris_phases));
+
+        %     [peb] = obj.calculatePerformanceMetrics();
+        %     rate = getrate(obj);
+        %     power = getpower(obj);
+        %     reward = obj.computeReward(peb);
+        %     reward = sqrt((real(reward)^2) - (imag(reward)^2));
+
+        %     direction = (obj.destination - obj.car_loc) / norm(obj.destination - obj.car_loc);
+        %     obj.car_loc = obj.car_loc + direction * obj.speed * obj.dt;
+        %     obj.time = obj.time + obj.dt;
+            
+        %     obj.target_loc = obj.car_loc;
+        %     obj.stepCount = obj.stepCount + 1;
+            
+            
+        %     destination_reached = norm(obj.car_loc - obj.destination) < obj.arrival_threshold;
+        %     out_of_bounds = checkOutOfBounds(obj);
+        %     timeout = obj.stepCount >= obj.maxSteps;
+        %     done = destination_reached || out_of_bounds || timeout;
+            
+        %     next_state = getState(obj);
+        % end
+
         function [next_state, reward, peb, rate, power, done] = step(obj, action)
+            % Update RIS Phases (Same as Before)
             ris_phases = action(1:obj.Nr);
             obj.phi = diag(exp(1j * 2 * pi * ris_phases));
 
-            [peb] = obj.calculatePerformanceMetrics();
+            % Compute Performance Metrics (Same as Before)
+            peb = obj.calculatePerformanceMetrics();
             rate = getrate(obj);
             power = getpower(obj);
             reward = obj.computeReward(peb);
-            reward = sqrt((real(reward)^2) - (imag(reward)^2));
+            reward = sqrt((real(reward)^2) - (imag(reward)^2)); 
 
+            % ---- Vehicle Motion with PID Steering ----
+            
+            % Define motion parameters
+            max_speed = 30;  % Max speed (m/s)
+            max_acceleration = 2;  % Max acceleration (m/s^2)
+            max_turning_angle = pi/6;  % Max turn angle (30 degrees)
+            
+            % Compute desired direction (normalized)
             direction = (obj.destination - obj.car_loc) / norm(obj.destination - obj.car_loc);
-            obj.car_loc = obj.car_loc + direction * obj.speed * obj.dt;
-            obj.time = obj.time + obj.dt;
             
+            % Compute the desired angle for the car
+            desired_angle = atan2(direction(2), direction(1));  
+            current_angle = obj.car_orientation;  % Car's current orientation angle
+            
+            % Compute error for PID control
+            angle_error = desired_angle - current_angle;
+            
+            % PID Controller Parameters (Tunable)
+            Kp = 0.5;  % Proportional gain
+            Ki = 0.01; % Integral gain (optional)
+            Kd = 0.1;  % Derivative gain
+            
+            % Compute PID terms
+            obj.integral_error = obj.integral_error + angle_error * obj.dt;  % Accumulate integral term
+            derivative_error = (angle_error - obj.prev_error) / obj.dt;  % Compute derivative term
+            
+            % Compute Steering Correction using PID
+            steering_angle = Kp * angle_error + Ki * obj.integral_error + Kd * derivative_error;
+            
+            % Limit the turning angle
+            steering_angle = max(-max_turning_angle, min(max_turning_angle, steering_angle));
+
+            % Update the car’s orientation
+            obj.car_orientation = obj.car_orientation + steering_angle;
+
+            % Store previous error for next derivative calculation
+            obj.prev_error = angle_error;
+
+            % Compute acceleration (simple model: accelerate if too slow, decelerate if too fast)
+            target_speed = obj.speed; % Desired speed
+            speed_diff = target_speed - obj.current_speed;
+            acceleration = max(-max_acceleration, min(max_acceleration, speed_diff / obj.dt));
+            
+            % Update speed (limit by max speed)
+            obj.current_speed = max(0, min(max_speed, obj.current_speed + acceleration * obj.dt));
+
+            % Compute new position based on updated speed and orientation
+            obj.car_loc = obj.car_loc + [cos(obj.car_orientation), sin(obj.car_orientation), 0] * obj.current_speed * obj.dt;
             obj.target_loc = obj.car_loc;
+
+            % Update time
+            obj.time = obj.time + obj.dt;
             obj.stepCount = obj.stepCount + 1;
-            
-            
+
+            % ---- Check Termination Conditions ----
             destination_reached = norm(obj.car_loc - obj.destination) < obj.arrival_threshold;
-            out_of_bounds = checkOutOfBounds(obj);
+            
+            % Check if car is out of bounds (within env_dims)
+            out_of_bounds = (obj.car_loc(1) < 0 || obj.car_loc(1) > obj.env_dims(1) || ...
+                            obj.car_loc(2) < 0 || obj.car_loc(2) > obj.env_dims(2));
+
             timeout = obj.stepCount >= obj.maxSteps;
             done = destination_reached || out_of_bounds || timeout;
-            
+
+            % Reset if out of bounds
+            if out_of_bounds
+                obj.car_loc = obj.target_loc; % Reset position
+                obj.car_orientation = 0; % Reset orientation
+                obj.current_speed = 0; % Stop car
+                obj.integral_error = 0; % Reset PID integral term
+                obj.prev_error = 0; % Reset PID previous error
+            end
+
+            % Get next state
             next_state = getState(obj);
         end
+        
 
         function out_of_bounds = checkOutOfBounds(obj)
             if obj.car_loc(1) > 1000 || obj.car_loc(2) > 1000
@@ -394,13 +488,13 @@ classdef RISISAC_V2X_Sim < handle
         end
 
         function reward = computeReward(obj, peb)
-            Q = 0.5;
+            % Q = 0.5;
             constraints_satisfied = (obj.rate >= obj.R_min);
 
-            base_reward = 1/peb;
+            base_reward = 1 / (1 + peb);  % Keeps reward bounded [0,1]
             
             if ~constraints_satisfied
-                reward = base_reward * Q;
+                reward = base_reward * (0.5 + 0.5 * (obj.rate / obj.R_min)); 
             else
                 reward = base_reward;
             end
@@ -458,25 +552,63 @@ classdef RISISAC_V2X_Sim < handle
         end
 
 
-        function [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj)
+        % function [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj)
+        %     % Extract coordinates
+        %     xb = obj.bs_loc(1);    yb = obj.bs_loc(2);    zb = obj.bs_loc(3);
+        %     xr = obj.ris_loc(1);   yr = obj.ris_loc(2);   zr = obj.ris_loc(3);
+        %     xt = obj.target_loc(1); yt = obj.target_loc(2); zt = obj.target_loc(3);
+            
+        %     % Calculate 3D Euclidean distances
+        %     L1 = sqrt((xb - xr)^2 + (yb - yr)^2 + (zb - zr)^2);
+        %     L2 = sqrt((xr - xt)^2 + (yr - yt)^2 + zr^2);
+        %     L3 = sqrt((xb - xt)^2 + (yb - yt)^2 + zb^2);
+            
+        %     % Calculate 2D (X-Y plane) projections
+        %     L_proj1 = sqrt((xb - xr)^2 + (yb - yr)^2);
+        %     L_proj2 = sqrt((xr - xt)^2 + (yr - yt)^2);
+        %     L_proj3 = sqrt((xb - xt)^2 + (yb - yt)^2);
+            
+        %     delays.line_of_sight = L3 / obj.c;
+        %     delays.non_line_of_sight = (L1 + L2) / obj.c;
+            
+        %     angles.bs_to_ris.azimuth = asin((zb - zr) / L1);
+        %     angles.bs_to_ris.elevation_azimuth = asin((xb - xr) / L_proj1);
+        %     angles.bs_to_ris.elevation_angle = acos((zb - zr) / L1);
+            
+        %     angles.ris_to_target.aoa = asin(zr / L2);
+        %     angles.ris_to_target.azimuth = acos((yr - yt) / L_proj2);
+        %     angles.ris_to_target.elevation_angle = acos(zr / L2);
+
+        %     angles.bs_to_target_transmit = acos(zb/L3);
+        %     angles.bs_to_target_receive = asin(zb/L3);
+        % end
+
+        function [L1, L2, L3, L1_t, L2_t, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj)
             % Extract coordinates
             xb = obj.bs_loc(1);    yb = obj.bs_loc(2);    zb = obj.bs_loc(3);
             xr = obj.ris_loc(1);   yr = obj.ris_loc(2);   zr = obj.ris_loc(3);
             xt = obj.target_loc(1); yt = obj.target_loc(2); zt = obj.target_loc(3);
             
-            % Calculate 3D Euclidean distances
+            % Reflection path
             L1 = sqrt((xb - xr)^2 + (yb - yr)^2 + (zb - zr)^2);
             L2 = sqrt((xr - xt)^2 + (yr - yt)^2 + zr^2);
             L3 = sqrt((xb - xt)^2 + (yb - yt)^2 + zb^2);
-            
+        
+            % Transmission path
+            L1_t = sqrt((xb - xr)^2 + (yb - yr)^2 + (zb - zr)^2);
+            L2_t = sqrt((xr - xt)^2 + (yr - yt)^2 + (zr - zt)^2);  % Different due to transmission
+
             % Calculate 2D (X-Y plane) projections
             L_proj1 = sqrt((xb - xr)^2 + (yb - yr)^2);
             L_proj2 = sqrt((xr - xt)^2 + (yr - yt)^2);
             L_proj3 = sqrt((xb - xt)^2 + (yb - yt)^2);
-            
+        
+            % Calculate delays
             delays.line_of_sight = L3 / obj.c;
             delays.non_line_of_sight = (L1 + L2) / obj.c;
-            
+            delays.transmitted = (L1_t + L2_t) / obj.c;
+        
+            % Angles (Reflection)
             angles.bs_to_ris.azimuth = asin((zb - zr) / L1);
             angles.bs_to_ris.elevation_azimuth = asin((xb - xr) / L_proj1);
             angles.bs_to_ris.elevation_angle = acos((zb - zr) / L1);
@@ -484,10 +616,13 @@ classdef RISISAC_V2X_Sim < handle
             angles.ris_to_target.aoa = asin(zr / L2);
             angles.ris_to_target.azimuth = acos((yr - yt) / L_proj2);
             angles.ris_to_target.elevation_angle = acos(zr / L2);
-
-            angles.bs_to_target_transmit = acos(zb/L3);
-            angles.bs_to_target_receive = asin(zb/L3);
+        
+            % Angles (Transmission)
+            angles.bs_to_star_ris = angles.bs_to_ris;  % Same as reflection
+            angles.star_ris_to_target.aoa = asin((zr - zt) / L2_t);
+            angles.star_ris_to_target.elevation_angle = acos((zr - zt) / L2_t);
         end
+        
 
         function [peb] = calculatePerformanceMetrics(obj)
             [J, ~, ~] = computeFisherInformationMatrix(obj);
