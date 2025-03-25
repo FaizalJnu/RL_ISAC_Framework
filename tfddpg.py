@@ -8,7 +8,7 @@ class ReplayBuffer:
         self.new_state_memory = np.zeros((self.memsize, *input_shape))
         self.action_memory = np.zeros((self.memsize, n_actions))
         self.reward_memory = np.zeros(self.memsize)
-        self.terminal_memory = np.zeros(self.memsize, dtype=np.bool)
+        self.terminal_memory = np.zeros(self.memsize, dtype=np.bool_)
         
     def store_transition(self, state, action, reward, new_state, done):
         index = self.mem_cntr % self.memsize
@@ -41,6 +41,13 @@ import tensorflow as tf
 from tensorflow import keras
 from keras import layers
 
+if(tf.config.list_physical_devices('GPU')):
+    tf.device('/device:GPU:0')
+    print("GPU is available")
+else:
+    tf.device('/device:CPU:0')
+    print("GPU is not available")
+
 
 class CriticNetwork(keras.Model):
     def __init__(self, fc1_dims = 512, fc2_dims = 512,
@@ -65,7 +72,7 @@ class CriticNetwork(keras.Model):
         
         return q
 
-class ActorNetwork(keras.model):
+class ActorNetwork(keras.Model):
     def __init__(self, fc1_dims=512, fc2_dims=512, n_actions=2, name='actor', 
                  chkpt_dir='tmp/ddpg'):
         super(ActorNetwork, self).__init__()
@@ -196,7 +203,7 @@ class Agent:
 import matlab.engine
 import matplotlib.pyplot as plt
 import os
-from utils import plot_learning_curve
+# from utils import plot_learning_curve
 
 class RISISACTrainer:
     def __init__(self):
@@ -204,7 +211,7 @@ class RISISACTrainer:
         self.eng = matlab.engine.start_matlab()
         self.sim = self.eng.RISISAC_V2X_Sim()
 
-        initial_state = self.sim.getState(self.sim)
+        initial_state = self.eng.getState(self.sim)
         initial_state = np.array(initial_state).flatten()
 
         state_dim = initial_state.shape
@@ -228,13 +235,13 @@ class RISISACTrainer:
         for episode in range(num_episodes):
             matlab_state = self.sim.getState(self.sim)
             state = self.process_state(matlab_state)
-            episode_reward = 0
+            reward = 0
             episode_losses = {'actor': [], 'critic': []}
 
             initial_peb = float(self.sim.calculatePerformanceMetrics(self.sim))
             min_peb = initial_peb
             peb_values_in_episode = [initial_peb]
-
+            rewards = []
             step_counter = 0
 
             for step in range(max_steps):
@@ -254,6 +261,7 @@ class RISISACTrainer:
                 
                 rate_vals[episode].append(rate)
                 power_vals[episode].append(power)
+                rewards[episode].append(reward)
 
                 peb_values_in_episode.append(cpeb)
                 min_peb = min(min_peb, cpeb)
@@ -275,9 +283,106 @@ class RISISACTrainer:
                 if done:
                     break
             
+            avg_rate = np.mean(rate_vals[episode])
+            avg_power = np.mean(power_vals[episode])
+            avg_reward = np.mean(rewards[episode])
+            
+                
+            if 'initial_peb' not in self.metrics:
+                self.metrics.update({
+                    'initial_peb': [initial_peb],
+                    'min_peb' : [min_peb],
+                    'rate': [avg_rate],
+                    'power': [avg_power],
+                    'reward': [avg_reward]
+                })
+            
+            self.metrics['initial_peb'].append(initial_peb)
+            self.metrics['min_peb'].append(min_peb)
+            self.metrics['rate'].append(avg_rate)
+            self.metrics['power'].append(avg_power)
+            self.metrics['reward'].append(avg_reward)
+            
             if episode % 10 == 0:
                 self.agent.save_models()
-            
+                print(f"\nEpisode {episode+1}/{num_episodes}")
+                print(f"Initial PEB: {initial_peb}")
+                print(f"Min PEB: {min_peb}")
+                print(f"Average Rate: {avg_rate}")
+                print(f"Average Power: {avg_power}")
+                print(f"Average Reward: {avg_reward}")
+                print("-"*50)
+                
+        return self.metrics
+    
+    def test(self, num_episodes=10):
+        print("Testing...")
+        for episode in range(num_episodes):
+            state = np.array(self.eng.reset(self.sim))
+            reward = 0
+            done = False
+            step = 0
+            while not done and step<200:
+                action = self.agent.choose_action(state, explore=False, evaluate=True)
+                next_state, reward, done = self.eng.step(self.sim, action, nargout=3)
+                state = np.array(next_state)
+                step += 1
+            print(f"Test episode {episode+1}/{num_episodes} completed with reward: {reward}")
+        print("Testing completed.")
+        
+    def close(self):
+        self.eng.quit()
+        print("Training completed.")
+    
+if __name__ == "__main__":
+    trainer = RISISACTrainer()
+    metrics = trainer.train(num_episodes=300, max_steps=10000)
+    trainer.test()
+    trainer.close()
+    
+    plt_folder = 'tfddpg_plots'
+    if not os.path.exists(plt_folder):
+        os.makedirs(plt_folder)
+        
+    
+    rewards = metrics['reward']
+    episodes = list(range(len(rewards)))    
+    plt.figure(figsize=(12, 8))
+    plt.plot(episodes, metrics['initial_peb'], label='Initial PEB')
+    plt.xlabel('Episodes')
+    plt.ylabel('PEB')
+    plt.grid(True)
+    plt.savefig(f'{plt_folder}/initial_peb.png')
+    
+    plt.figure(figsize=(12, 8))
+    plt.plot(episodes, metrics['min_peb'], label='Min PEB')
+    plt.xlabel('Episodes')
+    plt.ylabel('PEB')
+    plt.grid(True)
+    plt.savefig(f'{plt_folder}/min_peb.png')
+    
+    plt.figure(figsize=(12, 8))
+    plt.plot(episodes, metrics['rate'], label='Rate')
+    plt.xlabel('Episodes')
+    plt.ylabel('Rate')
+    plt.grid(True)
+    plt.savefig(f'{plt_folder}/rate.png')
+    
+    plt.figure(figsize=(12, 8)) 
+    plt.plot(episodes, metrics['power'], label='Power')
+    plt.xlabel('Episodes')
+    plt.ylabel('Power')
+    plt.grid(True)
+    plt.savefig(f'{plt_folder}/power.png')
+    
+    plt.figure(figsize=(12, 8))
+    plt.plot(episodes, rewards, label='Rewards')
+    plt.xlabel('Episodes')
+    plt.ylabel('Rewards')
+    plt.grid(True)
+    plt.savefig(f'{plt_folder}/rewards.png')
+    
+    
             
 
 
