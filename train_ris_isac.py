@@ -163,7 +163,7 @@ class RISISACTrainer:
 
                 step_counter = step_counter + 1
                 # Select action with exploration
-                action = self.agent.select_action(state, explore, epsilon_start)
+                action = self.agent.select_action(state, explore, epsilon_start) 
                 
                 # Convert and execute action
                 matlab_action = matlab.double(action.tolist())

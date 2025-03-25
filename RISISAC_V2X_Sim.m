@@ -138,14 +138,15 @@ classdef RISISAC_V2X_Sim < handle
         % ! -------------------- CHANNEL INITIALIZATION PART STARTS HERE --------------------        
         function initializeChannels(obj)
             [obj.H_bt, obj.H_br, obj.H_rt] = generate_channels(obj, obj.Nt, obj.Nr, obj.Nb);
+            
             rho_r = 1;
             Bit = 2;  
             Delta_delta = 2*pi / (2^Bit);  
-
             A = (0 : (2^Bit - 1)) * Delta_delta;
             theta = A(randi(numel(A), obj.Nr, 1));
             u = rho_r * exp(1j*theta);
             obj.phi = diag(u); 
+            
         end
         
         function [H_bt, H_br, H_rt] = generate_channels(obj, Nt, Nr, Nb)
