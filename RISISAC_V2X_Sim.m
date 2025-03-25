@@ -552,38 +552,38 @@ classdef RISISAC_V2X_Sim < handle
         end
 
 
-        % function [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj)
-        %     % Extract coordinates
-        %     xb = obj.bs_loc(1);    yb = obj.bs_loc(2);    zb = obj.bs_loc(3);
-        %     xr = obj.ris_loc(1);   yr = obj.ris_loc(2);   zr = obj.ris_loc(3);
-        %     xt = obj.target_loc(1); yt = obj.target_loc(2); zt = obj.target_loc(3);
+        function [L1, L2, L3, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj)
+            % Extract coordinates
+            xb = obj.bs_loc(1);    yb = obj.bs_loc(2);    zb = obj.bs_loc(3);
+            xr = obj.ris_loc(1);   yr = obj.ris_loc(2);   zr = obj.ris_loc(3);
+            xt = obj.target_loc(1); yt = obj.target_loc(2); zt = obj.target_loc(3);
             
-        %     % Calculate 3D Euclidean distances
-        %     L1 = sqrt((xb - xr)^2 + (yb - yr)^2 + (zb - zr)^2);
-        %     L2 = sqrt((xr - xt)^2 + (yr - yt)^2 + zr^2);
-        %     L3 = sqrt((xb - xt)^2 + (yb - yt)^2 + zb^2);
+            % Calculate 3D Euclidean distances
+            L1 = sqrt((xb - xr)^2 + (yb - yr)^2 + (zb - zr)^2);
+            L2 = sqrt((xr - xt)^2 + (yr - yt)^2 + zr^2);
+            L3 = sqrt((xb - xt)^2 + (yb - yt)^2 + zb^2);
             
-        %     % Calculate 2D (X-Y plane) projections
-        %     L_proj1 = sqrt((xb - xr)^2 + (yb - yr)^2);
-        %     L_proj2 = sqrt((xr - xt)^2 + (yr - yt)^2);
-        %     L_proj3 = sqrt((xb - xt)^2 + (yb - yt)^2);
+            % Calculate 2D (X-Y plane) projections
+            L_proj1 = sqrt((xb - xr)^2 + (yb - yr)^2);
+            L_proj2 = sqrt((xr - xt)^2 + (yr - yt)^2);
+            L_proj3 = sqrt((xb - xt)^2 + (yb - yt)^2);
             
-        %     delays.line_of_sight = L3 / obj.c;
-        %     delays.non_line_of_sight = (L1 + L2) / obj.c;
+            delays.line_of_sight = L3 / obj.c;
+            delays.non_line_of_sight = (L1 + L2) / obj.c;
             
-        %     angles.bs_to_ris.azimuth = asin((zb - zr) / L1);
-        %     angles.bs_to_ris.elevation_azimuth = asin((xb - xr) / L_proj1);
-        %     angles.bs_to_ris.elevation_angle = acos((zb - zr) / L1);
+            angles.bs_to_ris.azimuth = asin((zb - zr) / L1);
+            angles.bs_to_ris.elevation_azimuth = asin((xb - xr) / L_proj1);
+            angles.bs_to_ris.elevation_angle = acos((zb - zr) / L1);
             
-        %     angles.ris_to_target.aoa = asin(zr / L2);
-        %     angles.ris_to_target.azimuth = acos((yr - yt) / L_proj2);
-        %     angles.ris_to_target.elevation_angle = acos(zr / L2);
+            angles.ris_to_target.aoa = asin(zr / L2);
+            angles.ris_to_target.azimuth = acos((yr - yt) / L_proj2);
+            angles.ris_to_target.elevation_angle = acos(zr / L2);
 
-        %     angles.bs_to_target_transmit = acos(zb/L3);
-        %     angles.bs_to_target_receive = asin(zb/L3);
-        % end
+            angles.bs_to_target_transmit = acos(zb/L3);
+            angles.bs_to_target_receive = asin(zb/L3);
+        end
 
-        function [L1, L2, L3, L1_t, L2_t, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParameters(obj)
+        function [L1, L2, L3, L1_t, L2_t, L_proj1, L_proj2, L_proj3, delays, angles] = computeGeometricParametersStar(obj)
             % Extract coordinates
             xb = obj.bs_loc(1);    yb = obj.bs_loc(2);    zb = obj.bs_loc(3);
             xr = obj.ris_loc(1);   yr = obj.ris_loc(2);   zr = obj.ris_loc(3);

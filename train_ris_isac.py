@@ -154,11 +154,12 @@ class RISISACTrainer:
             
             for step in range(max_steps):
 
-                value = np.random.uniform(0,1)
-                if (value < epsilon_start):
-                    explore = True
-                else:
-                    explore = False
+                # value = np.random.uniform(0,1)
+                # if (value < epsilon_start):
+                #     explore = True
+                # else:
+                #     explore = False
+                explore = False
 
                 step_counter = step_counter + 1
                 # Select action with exploration
