@@ -26,6 +26,7 @@ classdef RISISAC_V2X_Sim < handle
         Pb = 0
         R_min = 0
         H_combined
+        Jzao
         
         % Path loss parameters
         alpha_l = 3.2             % Direct path loss exponent
@@ -86,7 +87,8 @@ classdef RISISAC_V2X_Sim < handle
             % Initialize channels
             obj.initializeChannels();
             obj.calculated_values();
-            obj.destination = [randi([990, 1000]), randi([990, 1000]), 0];
+            % obj.destination = [randi([990, 1000]), randi([990, 1000]), 0];
+            obj.destination = [999, 999, 0];
         end
 
         function nb = get_Nb(obj)
@@ -118,7 +120,6 @@ classdef RISISAC_V2X_Sim < handle
             end
             obj.gamma_c = mean(gamma_c_per_subcarrier);
 
-            % disp(['gamma_c: ' num2str(obj.gamma_c)]);
             obj.SNR = log10(obj.gamma_c);
 
             obj.rate = getrate(obj);
@@ -391,9 +392,14 @@ classdef RISISAC_V2X_Sim < handle
         % end
 
         function [next_state, reward, peb, rate, power, done] = step(obj, action)
+            disp("taget location is?");
+            disp(obj.target_loc);
             % Update RIS Phases (Same as Before)
             ris_phases = action(1:obj.Nr);
+            % disp("this is ris_phases");
+            % disp(ris_phases);
             obj.phi = diag(exp(1j * 2 * pi * ris_phases));
+
 
             % Compute Performance Metrics (Same as Before)
             peb = obj.calculatePerformanceMetrics();
@@ -641,11 +647,11 @@ classdef RISISAC_V2X_Sim < handle
                 obj.peb = obj.peb * penalty_factor;
             end
             obj.peb = sqrt((real(obj.peb)^2) - (imag(obj.peb)^2))*100;
-            if(obj.peb < obj.minpeb)
-                obj.minpeb = obj.peb;
-            else
-                obj.peb = obj.minpeb;
-            end
+            % if(obj.peb < obj.minpeb)
+            %     obj.minpeb = obj.peb;
+            % else
+            %     obj.peb = obj.minpeb;
+            % end
             peb = obj.peb;
         end
         
@@ -680,6 +686,8 @@ classdef RISISAC_V2X_Sim < handle
             W = rand(obj.Nb, obj.Mb) + 1j*randn(obj.Nb, obj.Mb);
             W = W ./ vecnorm(W); 
             
+            % disp("This is W:");
+            % disp(W);
             % Initialize Wx with proper dimensions
             Wx = zeros(obj.Nb, N);
             
@@ -884,7 +892,7 @@ classdef RISISAC_V2X_Sim < handle
                     end
                 end                
             end
- 
+            obj.Jzao = J_zao;
         end                         
         % ! -------------------- PEB COMPUTATION PART ENDS HERE --------------------        
 

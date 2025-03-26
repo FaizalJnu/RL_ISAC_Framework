@@ -183,7 +183,7 @@ class RISISACTrainer:
                 done = bool(done)
                 
                 # Store transition and update networks
-                self.agent.replay_buffer.push(state, action, reward, next_state)
+                self.agent.replay_buffer.push(state, action, reward, next_state, done)
                 actor_loss, critic_loss = self.agent.update()
                 
                 # Track step metrics
@@ -253,7 +253,7 @@ class RISISACTrainer:
             decay_rate = self.agent.decay_learning_rates()
             
             # Print progress
-            if episode % 10 == 0:
+            if episode % 1 == 0:
                 self.plot_training_progress()
                 print(f"\nEpisode {episode + 1}/{num_episodes}")
                 print(f"Reward: {episode_reward:.3f}")
@@ -262,7 +262,7 @@ class RISISACTrainer:
                 # print(f"Max PEB: {max_peb_in_episode:.6f}")
                 # print(f"Avg PEB: {avg_peb_in_episode:.6f}")
                 print(f"Last PEB: {last_peb_in_episode:.6f}")
-                # print(f"Best PEB (all episodes): {self.best_metrics['peb']:.6f}")
+                print(f"Best PEB (all episodes): {self.best_metrics['peb']:.6f}")
                 print(f"Learning Rate: {self.agent.current_actor_lr:.6f}")
                 print(f"Buffer Size: {len(self.agent.replay_buffer)}")
                 print(f"Decay rate is: {decay_rate}")
@@ -377,6 +377,14 @@ if __name__ == "__main__":
         plt.ylabel('Power(db)')
         plt.grid(True)
         plt.savefig(os.path.join(plt_folder,'power_per_episode'))
+
+        plt.figure(figsize=(10,5))
+        plt.plot(episodes, metrics['best_peb'])
+        plt.title('Best PEB per episode')
+        plt.xlabel('Episode')
+        plt.ylabel('PEB')
+        plt.grid(True)
+        plt.savefig(os.path.join(plt_folder,'best_peb_per_episode'))
         # plt.show()
 
     finally:

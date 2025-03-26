@@ -50,15 +50,15 @@ else:
 
 
 class CriticNetwork(keras.Model):
-    def __init__(self, fc1_dims = 512, fc2_dims = 512,
+    def __init__(self, n_actions, fc1_dims = 512, fc2_dims = 512,
                  name='critic', chkpt_dir='tmp/ddpg'):
         super(CriticNetwork, self).__init__()
         self.fc1_dims = fc1_dims
         self.fc2_dims = fc2_dims
-        # self.n_Actions = n_Actions
+        self.n_actions = n_actions
         self.model_name = name
         self.chkpt_dir = chkpt_dir
-        self.checkpoint_file = os.path.join(self.chkpt_dir, name+'_ddpg.h5')
+        self.checkpoint_file = os.path.join(self.chkpt_dir, name+'_ddpg.weights.h5')
         
         self.fc1 = layers.Dense(self.fc1_dims, activation='relu')
         self.fc2 = layers.Dense(self.fc2_dims, activation='relu')
@@ -73,7 +73,7 @@ class CriticNetwork(keras.Model):
         return q
 
 class ActorNetwork(keras.Model):
-    def __init__(self, fc1_dims=512, fc2_dims=512, n_actions=2, name='actor', 
+    def __init__(self, n_actions, fc1_dims=512, fc2_dims=512, name='actor', 
                  chkpt_dir='tmp/ddpg'):
         super(ActorNetwork, self).__init__()
         self.fc1_dims = fc1_dims
@@ -81,7 +81,7 @@ class ActorNetwork(keras.Model):
         self.n_actions = n_actions
         self.model_name = name
         self.chkpt_dir = chkpt_dir
-        self.checkpoint_file = os.path.join(self.chkpt_dir, name+'_ddpg.h5')
+        self.checkpoint_file = os.path.join(self.chkpt_dir, name+'_ddpg.weights.h5')
         
         self.fc1 = layers.Dense(self.fc1_dims, activation='relu')
         self.fc2 = layers.Dense(self.fc2_dims, activation='relu')
@@ -108,8 +108,8 @@ class Agent:
         self.batch_size = batch_size
         self.memory = ReplayBuffer(max_size, input_dims, n_actions)
         self.noise = noise
-        self.max_action = env.action_space.high[0]
-        self.min_action = env.action_space.low[0]
+        # self.max_action = env.action_space.high[0]
+        # self.min_action = env.action_space.low[0]
         
         self.actor = ActorNetwork(n_actions=n_actions, name='actor')
         self.critic = CriticNetwork(n_actions = n_actions, name='critic')
@@ -157,16 +157,26 @@ class Agent:
         self.critic.load_weights(self.critic.checkpoint_file)
         self.target_critic.load_weights(self.target_critic.checkpoint_file)
 
-    def choose_action(self, observation, explore, evaluate=False):
-        state = tf.convert_to_tensor([observation], dtype=tf.float32)
-        actions = self.actor(state)
-        if not evaluate or explore:
-            actions += tf.random.normal(shape=[self.actor.n_actions], mean=0.0, stddev=self.noise)
+    # def choose_action(self, observation, explore, evaluate=False):
+    #     state = tf.convert_to_tensor([observation], dtype=tf.float32)
+    #     actions = self.actor(state)
+    #     if not evaluate or explore:
+    #         actions += tf.random.normal(shape=[self.actor.n_actions], mean=0.0, stddev=self.noise)
 
-        actions = tf.clip_by_value(actions, self.min_action, self.max_action)
+    #     actions = tf.clip_by_value(actions, self.min_action, self.max_action)
         
-        return actions[0]
-    
+    #     return actions[0]
+
+    def choose_action(self, observation, explore, epsilon):
+        state = tf.convert_to_tensor([observation], dtype=tf.float32)
+        action = self.actor(state)
+        
+        if explore:
+            noise = tf.random.normal(shape=action.shape, mean=0.0, stddev=epsilon)
+            action += noise
+        
+        return action[0]
+
     def learn(self):
         if self.memory.mem_cntr < self.batch_size:
             return
@@ -228,20 +238,22 @@ class RISISACTrainer:
         epsilon_min = 0.01
         epsilon_decay = 0.995
 
-        rate_vals = []
+        rate_vals = [[] for _ in range(num_episodes)]
 
-        power_vals = []
+        power_vals = [[] for _ in range(num_episodes)]
 
         for episode in range(num_episodes):
-            matlab_state = self.sim.getState(self.sim)
+            matlab_state = self.eng.getState(self.sim)
             state = self.process_state(matlab_state)
             reward = 0
+            episode_reward = 0
+            done = False
             episode_losses = {'actor': [], 'critic': []}
 
-            initial_peb = float(self.sim.calculatePerformanceMetrics(self.sim))
+            initial_peb = float(self.eng.calculatePerformanceMetrics(self.sim))
             min_peb = initial_peb
             peb_values_in_episode = [initial_peb]
-            rewards = []
+            rewards = [[] for _ in range(num_episodes)]
             step_counter = 0
 
             for step in range(max_steps):
@@ -253,9 +265,9 @@ class RISISACTrainer:
                     explore = False
 
                 step_counter += 1
-                action = self.agent.choose_action(state, explore)
+                action = self.agent.choose_action(state, explore, epsilon)
 
-                matlab_action = matlab.double(action.tolist())
+                matlab_action = matlab.double(action.numpy().tolist())
 
                 next_matlab_state, reward, cpeb, rate, power, done = self.eng.step(self.sim, matlab_action, nargout=6)
                 
@@ -323,7 +335,7 @@ class RISISACTrainer:
             done = False
             step = 0
             while not done and step<200:
-                action = self.agent.choose_action(state, explore=False, evaluate=True)
+                action = self.agent.choose_action(state, explore=False, epsilon=0)
                 next_state, reward, done = self.eng.step(self.sim, action, nargout=3)
                 state = np.array(next_state)
                 step += 1
