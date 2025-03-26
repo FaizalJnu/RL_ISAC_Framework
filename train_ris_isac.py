@@ -208,7 +208,8 @@ class RISISACTrainer:
             
             # Normalize reward
             episode_reward = episode_reward/step_counter
-            
+
+
             # Store PEB metrics
             if 'initial_peb_values' not in self.metrics:
                 self.metrics.update({
@@ -378,14 +379,15 @@ if __name__ == "__main__":
         plt.grid(True)
         plt.savefig(os.path.join(plt_folder,'power_per_episode'))
 
-        plt.figure(figsize=(10,5))
-        plt.plot(episodes, metrics['best_peb'])
-        plt.title('Best PEB per episode')
-        plt.xlabel('Episode')
-        plt.ylabel('PEB')
-        plt.grid(True)
-        plt.savefig(os.path.join(plt_folder,'best_peb_per_episode'))
+        # plt.figure(figsize=(10,5))
+        # plt.plot(episodes, metrics['best_peb'])
+        # plt.title('Best PEB per episode')
+        # plt.xlabel('Episode')
+        # plt.ylabel('PEB')
+        # plt.grid(True)
+        # plt.savefig(os.path.join(plt_folder,'best_peb_per_episode'))
         # plt.show()
+
 
     finally:
         # Clean up

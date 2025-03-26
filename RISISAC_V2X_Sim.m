@@ -20,6 +20,7 @@ classdef RISISAC_V2X_Sim < handle
         h_nl = 0;
         gamma_c = 0;
         SNR = 0;
+        noise_var = 0;
         cc = 0;
         speed = 10
         end_x = 1000
@@ -105,7 +106,7 @@ classdef RISISAC_V2X_Sim < handle
 
             obj.h_nl = (sigma * complex(randn(1,1), randn(1,1))) + mu;
             
-            [HLos,HLos_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nr, obj.Nb);
+            [HLos,HLos_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
             [HNLos,HNLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
             obj.H_combined = HLos + HNLos;
 
@@ -125,6 +126,8 @@ classdef RISISAC_V2X_Sim < handle
             obj.rate = getrate(obj);
             obj.cc = obj.B * log2(1+obj.SNR);
             obj.R_min = obj.B*60;
+
+            obj.noise_var = obj.Pb / obj.gamma_c;
         end
 
         function Pb = getpower(obj)
@@ -272,7 +275,7 @@ classdef RISISAC_V2X_Sim < handle
             end
         end
         
-        function [H_Los, H_Los_3d] = generate_H_Los(obj, H_bt, Nt, ~, Nb)
+        function [H_Los, H_Los_3d] = generate_H_Los(obj, H_bt, Nt, Nb)
             K_dB = 4; 
             K = 10^(K_dB/10);
             sigma = sqrt(1/(2*(K+1)));
@@ -392,8 +395,8 @@ classdef RISISAC_V2X_Sim < handle
         % end
 
         function [next_state, reward, peb, rate, power, done] = step(obj, action)
-            disp("taget location is?");
-            disp(obj.target_loc);
+            % disp("taget location is?");
+            % disp(obj.target_loc);
             % Update RIS Phases (Same as Before)
             ris_phases = action(1:obj.Nr);
             % disp("this is ris_phases");
@@ -741,19 +744,60 @@ classdef RISISAC_V2X_Sim < handle
         %     end
         % end        
         
-        function [J, Jzao, T] = computeFisherInformationMatrix(obj)
-            sigma_s = sqrt(obj.SNR/obj.Pb);  % Noise variance (placeholder)
+        function [J, J_zao, T] = computeFisherInformationMatrix(obj)
+            % sigma_s = sqrt(obj.SNR/obj.Pb);  % Noise variance (placeholder)
             [T] = computeTransformationMatrix(obj);
-            [Wx,~] = computeWx(obj);
-            gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
-            gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
+            % [Wx,~] = computeWx(obj);
+            % gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
+            % gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
             
-            [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, obj.Ns, obj.B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
-            [Jzao] = calculateJacobianMatrix(obj, obj.Pb, sigma_s, obj.Ns, Wx, A1, A2, A3, A4);
-            
+            % [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, obj.Ns, obj.B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
+            % [Jzao] = calculateJacobianMatrix(obj, obj.Pb, sigma_s, obj.Ns, Wx, A1, A2, A3, A4);
+            H_Los_3d = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
+            H_NLoS_3d = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
+            J_zao = computeJZao(obj, H_Los_3d, H_NLoS_3d);
+
             % Compute final Fisher Information Matrix
-            J = T * Jzao * T';
+            J = T * J_zao * T';
         end
+
+        function J_zao = computeJZao(obj, H_Los, H_NLoS)
+            % Extract parameters from object
+            B = obj.B;
+            fc = obj.fc;
+            c = physconst('LightSpeed');
+            N_ant_ris = 64^2;  % RIS elements
+            
+            % Calculate frequency-dependent SNRs
+            snr_direct = squeeze(mean(abs(H_Los).^2, [1 2])) / obj.noise_var;  % [Ns×1]
+            snr_reflected = squeeze(mean(abs(H_NLoS).^2, [1 2])) / obj.noise_var;
+            
+            % Average SNR across subcarriers
+            avg_snr_direct = mean(snr_direct);
+            avg_snr_reflected = mean(snr_reflected);
+            
+            % Calculate parameter variances (CRLB)
+            lambda = c/fc;
+            var_delay_direct = 1./(8*pi^2 * B^2 * snr_direct);
+            var_delay_reflected = 1./(8*pi^2 * B^2 * snr_reflected);
+            
+            var_angle_direct = lambda^2./(8*pi^2 * snr_direct * (lambda/2)^2);
+            var_angle_reflected = lambda^2./(8*pi^2 * snr_reflected * ((lambda/2)^2 * N_ant_ris));
+            
+            % Frequency-average variances
+            sigma_sq = [
+                mean(var_delay_direct);     % BS-target delay
+                mean(var_delay_reflected);  % RIS-target delay
+                mean(var_angle_reflected);  % RIS angle 1
+                mean(var_angle_reflected);  % RIS angle 2
+                mean(var_angle_reflected);  % RIS angle 3
+                mean(var_angle_direct);     % BS elevation 1
+                mean(var_angle_direct)      % BS elevation 2
+            ];
+            
+            J_zao = diag(1./sigma_sq);
+        end
+           
         
         function [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, N, B, gamma_l, gamma_nl, h_l, h_nl)
             [~, ~, ~, ~, ~, ~, delays, ~] = computeGeometricParameters(obj);
@@ -779,121 +823,123 @@ classdef RISISAC_V2X_Sim < handle
             end
         end 
 
-        function [J_zao] = calculateJacobianMatrix(obj, Pb, sigma, N, Wx, A1, A2, A3, A4)
-            % TODO: Initialize 7x7 Jacobian matrix
-            J_zao = zeros(7, 7);
-            [~, ~, ~, ~, ~, ~, ~, angles] = computeGeometricParameters(obj);
-            psi_rt = angles.ris_to_target.aoa;
-            psi_bt = angles.bs_to_target_transmit;
-            psi_tb = angles.bs_to_target_receive;
-            psi_br = angles.bs_to_ris.azimuth;
-            phi_rt_a = angles.ris_to_target.azimuth;
-            phi_rt_e = angles.ris_to_target.elevation_angle;
-            phi_br_a = angles.bs_to_ris.elevation_azimuth;
-            phi_br_e = angles.bs_to_ris.elevation_angle;
+        % function [J_zao] = calculateJacobianMatrix(obj, Pb, sigma, N, Wx, A1, A2, A3, A4)
+        %     % TODO: Initialize 7x7 Jacobian matrix
+        %     J_zao = zeros(7, 7);
+        %     [~, ~, ~, ~, ~, ~, ~, angles] = computeGeometricParameters(obj);
+        %     psi_rt = angles.ris_to_target.aoa;
+        %     psi_bt = angles.bs_to_target_transmit;
+        %     psi_tb = angles.bs_to_target_receive;
+        %     psi_br = angles.bs_to_ris.azimuth;
+        %     phi_rt_a = angles.ris_to_target.azimuth;
+        %     phi_rt_e = angles.ris_to_target.elevation_angle;
+        %     phi_br_a = angles.bs_to_ris.elevation_azimuth;
+        %     phi_br_e = angles.bs_to_ris.elevation_angle;
 
-            % Initialize a_rt with proper dimensions
-            % Initialize a_rt, a_bt, and a_tb with proper dimensions
-            a_rt = zeros(obj.Nt, obj.Ns);
-            a_bt = zeros(obj.Nb, obj.Ns);
-            a_tb = zeros(obj.Nt, obj.Ns);
+        %     % Initialize a_rt with proper dimensions
+        %     % Initialize a_rt, a_bt, and a_tb with proper dimensions
+        %     a_rt = zeros(obj.Nt, obj.Ns);
+        %     a_bt = zeros(obj.Nb, obj.Ns);
+        %     a_tb = zeros(obj.Nt, obj.Ns);
 
-            % Calculate for each subcarrier
-            for n = 1:obj.Ns
-                % For a_rt - we need a column vector, not a diagonal matrix
-                indices = (0:(obj.Nt-1))';  % Column vector of indices
-                a_rt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_rt) * indices;
+        %     % Calculate for each subcarrier
+        %     for n = 1:obj.Ns
+        %         % For a_rt - we need a column vector, not a diagonal matrix
+        %         indices = (0:(obj.Nt-1))';  % Column vector of indices
+        %         a_rt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_rt) * indices;
                 
-                % For a_bt
-                indices_b = (0:(obj.Nb-1))';
-                a_bt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_bt) * indices_b;
+        %         % For a_bt
+        %         indices_b = (0:(obj.Nb-1))';
+        %         a_bt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_bt) * indices_b;
                 
-                % For a_tb
-                a_tb(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_tb) * indices;
-            end
+        %         % For a_tb
+        %         a_tb(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_tb) * indices;
+        %     end
 
-            % Initialize arrays for a_rt_a and a_rt_e
-            a_rt_a = zeros(obj.Nr, obj.Ns);
-            a_rt_e = zeros(obj.Nr, obj.Ns);
+        %     % Initialize arrays for a_rt_a and a_rt_e
+        %     a_rt_a = zeros(obj.Nr, obj.Ns);
+        %     a_rt_e = zeros(obj.Nr, obj.Ns);
 
-            % Calculate a_rt_a and a_rt_e for each subcarrier
-            for n = 1:obj.Ns
-                a_rt_a(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * ((obj.Nx-1) * cos(phi_rt_a) * sin(phi_rt_e));
-                a_rt_e(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * (((obj.Nx-1) * sin(phi_rt_a) * cos(phi_rt_e)) - ((obj.Ny-1) * sin(phi_rt_e)));
-            end
+        %     % Calculate a_rt_a and a_rt_e for each subcarrier
+        %     for n = 1:obj.Ns
+        %         a_rt_a(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * ((obj.Nx-1) * cos(phi_rt_a) * sin(phi_rt_e));
+        %         a_rt_e(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * (((obj.Nx-1) * sin(phi_rt_a) * cos(phi_rt_e)) - ((obj.Ny-1) * sin(phi_rt_e)));
+        %     end
 
-            % TODO: implement all the a vector
-            a_vec = compute_a_psi(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2);
-            a_psi_bt = a_vec;
-            a_vec = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2);
-            a_psi_tb = a_vec;
-            a_vec = compute_a_psi(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2);
-            a_psi_rt = a_vec;
-            a_vec = compute_a_psi(obj, obj.Nb, psi_br, obj.lambda, obj.lambda/2);
-            a_psi_br = a_vec;
+        %     % TODO: implement all the a vector
+        %     a_vec = compute_a_psi(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2);
+        %     a_psi_bt = a_vec;
+        %     a_vec = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2);
+        %     a_psi_tb = a_vec;
+        %     a_vec = compute_a_psi(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2);
+        %     a_psi_rt = a_vec;
+        %     a_vec = compute_a_psi(obj, obj.Nb, psi_br, obj.lambda, obj.lambda/2);
+        %     a_psi_br = a_vec;
 
 
-            % TODO: implement all the steering vector
-            a_phi_br = compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2);
-            a_phi_rt = compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, obj.lambda, obj.lambda/2);
+        %     % TODO: implement all the steering vector
+        %     a_phi_br = compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2);
+        %     a_phi_rt = compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, obj.lambda, obj.lambda/2);
 
-            for n = 1:N
-                % Calculate all partial derivatives
-                d_mu_array = cell(7, 1);
+        %     for n = 1:N
+        %         % Calculate all partial derivatives
+        %         d_mu_array = cell(7, 1);
                 
-                % Extract the nth column from each steering vector matrix
-                a_psi_bt_n = a_psi_bt(:,n);
-                a_psi_tb_n = a_psi_tb(:,n);
-                a_psi_rt_n = a_psi_rt(:,n);
-                a_psi_br_n = a_psi_br(:,n);
-                a_phi_rt_n = a_phi_rt(:,n);
-                a_phi_br_n = a_phi_br(:,n);
+        %         % Extract the nth column from each steering vector matrix
+        %         a_psi_bt_n = a_psi_bt(:,n);
+        %         a_psi_tb_n = a_psi_tb(:,n);
+        %         a_psi_rt_n = a_psi_rt(:,n);
+        %         a_psi_br_n = a_psi_br(:,n);
+        %         a_phi_rt_n = a_phi_rt(:,n);
+        %         a_phi_br_n = a_phi_br(:,n);
                 
-                % Extract the nth element from amplitude matrices
-                A1_n = A1(n);
-                A2_n = A2(n);
-                A3_n = A3(n);
-                A4_n = A4(n);
+        %         % Extract the nth element from amplitude matrices
+        %         A1_n = A1(n);
+        %         A2_n = A2(n);
+        %         A3_n = A3(n);
+        %         A4_n = A4(n);
                 
-                % Partial derivatives with respect to each parameter
-                % d_mu_d_tau_l
-                d_mu_array{1} = (A1_n * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
+        %         % Partial derivatives with respect to each parameter
+        %         % d_mu_d_tau_l
+        %         d_mu_array{1} = (A1_n * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
                 
-                % d_mu_d_tau_nl
-                d_mu_array{2} = (A2_n * a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
+        %         % d_mu_d_tau_nl
+        %         d_mu_array{2} = (A2_n * a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
                 
-                d_mu_array{3} = A3_n * (a_rt(:,n) .* a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
+        %         d_mu_array{3} = A3_n * (a_rt(:,n) .* a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
 
-                % d_mu_d_phi_rt_a
-                d_mu_array{4} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_a(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
+        %         % d_mu_d_phi_rt_a
+        %         d_mu_array{4} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_a(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
                 
-                % d_mu_d_phi_rt_e
-                d_mu_array{5} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_e(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
+        %         % d_mu_d_phi_rt_e
+        %         d_mu_array{5} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_e(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
                 
-                % d_mu_d_psi_br
-                d_mu_array{6} = (A4_n * a_bt(:,n)' * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
+        %         % d_mu_d_psi_br
+        %         d_mu_array{6} = (A4_n * a_bt(:,n)' * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
                 
-                d_mu_array{7} = A4_n * (a_tb(:,n) .* a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
+        %         d_mu_array{7} = A4_n * (a_tb(:,n) .* a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
 
-                % Calculate Jacobian matrix elements
-                for i = 1:7
-                    for j = 1:7
-                        % Get the sizes of the current derivatives
-                        [rows_i, cols_i] = size(d_mu_array{i});
-                        [rows_j, cols_j] = size(d_mu_array{j});
+        %         % Calculate Jacobian matrix elements
+        %         for i = 1:7
+        %             for j = 1:7
+        %                 % Get the sizes of the current derivatives
+        %                 [rows_i, cols_i] = size(d_mu_array{i});
+        %                 [rows_j, cols_j] = size(d_mu_array{j});
                         
-                        % Compute the FIM entry based on dimensions
-                        if rows_i == rows_j && cols_i == cols_j
-                            % If dimensions match, use dot product
-                            J_zao(i,j) = J_zao(i,j) + real(sum(sum(conj(d_mu_array{i}) .* d_mu_array{j})));
-                        else
-                            J_zao(i,j) = J_zao(i,j) + real(sum(sum(d_mu_array{i} * d_mu_array{j}')));
-                        end
-                    end
-                end                
-            end
-            obj.Jzao = J_zao;
-        end                         
+        %                 % Compute the FIM entry based on dimensions
+        %                 if rows_i == rows_j && cols_i == cols_j
+        %                     % If dimensions match, use dot product
+        %                     J_zao(i,j) = J_zao(i,j) + real(sum(sum(conj(d_mu_array{i}) .* d_mu_array{j})));
+        %                 else
+        %                     J_zao(i,j) = J_zao(i,j) + real(sum(sum(d_mu_array{i} * d_mu_array{j}')));
+        %                 end
+        %             end
+        %         end                
+        %     end
+        %     obj.Jzao = J_zao;
+        %     disp("This is J_zao");
+        %     disp(J_zao);
+        % end                         
         % ! -------------------- PEB COMPUTATION PART ENDS HERE --------------------        
 
     end
