@@ -499,6 +499,11 @@ classdef RISISAC_V2X_Sim < handle
             else
                 reward = base_reward;
             end
+
+            % if (obj.peb > obj.minpeb)
+            %     reward = reward*-1;
+            % end
+
         end
 
         function done = isEpisodeDone(obj)
@@ -636,11 +641,11 @@ classdef RISISAC_V2X_Sim < handle
                 obj.peb = obj.peb * penalty_factor;
             end
             obj.peb = sqrt((real(obj.peb)^2) - (imag(obj.peb)^2))*100;
-            % if(obj.peb < obj.minpeb)
-            %     obj.minpeb = obj.peb;
-            % else
-            %     obj.peb = obj.minpeb;
-            % end
+            if(obj.peb < obj.minpeb)
+                obj.minpeb = obj.peb;
+            else
+                obj.peb = obj.minpeb;
+            end
             peb = obj.peb;
         end
         

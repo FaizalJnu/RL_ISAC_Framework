@@ -154,12 +154,12 @@ class RISISACTrainer:
             
             for step in range(max_steps):
 
-                # value = np.random.uniform(0,1)
-                # if (value < epsilon_start):
-                #     explore = True
-                # else:
-                #     explore = False
-                explore = False
+                value = np.random.uniform(0,1)
+                if (value < epsilon_start):
+                    explore = True
+                else:
+                    explore = False
+                # explore = False
 
                 step_counter = step_counter + 1
                 # Select action with exploration
@@ -340,6 +340,9 @@ if __name__ == "__main__":
         # plt.legend()
         
         plt_folder = 'plots'
+        if not os.path.exists(plt_folder):
+            os.makedirs(plt_folder)
+        
         # Plot training rewards
         plt.figure(figsize=(10, 5))
         plt.plot(episodes, rewards)
@@ -373,7 +376,7 @@ if __name__ == "__main__":
         plt.xlabel('Episode')
         plt.ylabel('Power(db)')
         plt.grid(True)
-        plt.savefig(os.path.join(plt_folder,'Hybrid_power_per_episode'))
+        plt.savefig(os.path.join(plt_folder,'power_per_episode'))
         # plt.show()
 
     finally:
