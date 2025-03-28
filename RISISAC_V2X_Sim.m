@@ -609,7 +609,7 @@ classdef RISISAC_V2X_Sim < handle
             L2 = sqrt((xr - xt)^2 + (yr - yt)^2 + zr^2);
             L3 = sqrt((xb - xt)^2 + (yb - yt)^2 + zb^2);
         
-            % Transmission path
+            % Transmission path  
             L1_t = sqrt((xb - xr)^2 + (yb - yr)^2 + (zb - zr)^2);
             L2_t = sqrt((xr - xt)^2 + (yr - yt)^2 + (zr - zt)^2);  % Different due to transmission
 
