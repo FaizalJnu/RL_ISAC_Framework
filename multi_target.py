@@ -1,4 +1,4 @@
-from ddpg import FLDDPG
+from flddpg import FLDDPG
 import matlab.engine 
 import numpy as np
 import matplotlib.pyplot as plt

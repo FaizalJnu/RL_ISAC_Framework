@@ -1,0 +1,1 @@
+{"name":"Local: asuna","url":"/Users/faizal/work/RL_ISAC_Framework/asuna.cpp","tests":[{"id":1743262639175,"input":"4\n3\n5 3 9\n2\n3 2\n4\n1 2 2 1\n5\n5 4 3 2 9\n","output":"9\n5\n5\n21\n"}],"interactive":false,"memoryLimit":1024,"timeLimit":3000,"srcPath":"/Users/faizal/work/RL_ISAC_Framework/asuna.cpp","group":"local","local":true}

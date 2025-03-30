@@ -1,6 +1,6 @@
 import matlab.engine
 import numpy as np
-from ddpg import FLDDPG  # Import our DDPG implementation
+from flddpg import FLDDPG  # Import our DDPG implementation
 import torch
 import matplotlib.pyplot as plt
 import os
@@ -24,16 +24,17 @@ class RISISACTrainer:
         self.agent = FLDDPG(
             state_dim=state_dim,
             action_dim=action_dim,
-            hidden_dims=[256, 256],
-            buffer_size=1000000,
-            batch_size=64,
-            gamma=0.99,
-            tau=0.001,
-            actor_lr=1e-4,
-            critic_lr=1e-3,
-            lr_decay_rate=0.995,
-            min_lr=1e-6
+            hidden_dims=[400, 300],
+            buffer_size=10000,  # 𝒟 = 10000
+            batch_size=16,  # 𝑇ₘₐₓ = 16
+            gamma=0.95,  # γ_b = 0.95
+            tau=0.00001,  # τ_tc and τ_ta = 0.00001
+            actor_lr=0.001,  # μ_ta = 0.001
+            critic_lr=0.001,  # μ_tc = 0.001
+            lr_decay_rate=0.00001,  # λ_tc and λ_ta = 0.00001
+            min_lr=1e-6,  # Not explicitly in the table, but might be useful
         )
+
         
         # Initialize metrics tracking
         self.metrics = {
@@ -144,10 +145,10 @@ class RISISACTrainer:
             episode_losses = {'actor': [], 'critic': []}
             
             # Initialize PEB tracking for this episode
-            initial_peb = float(self.eng.calculatePerformanceMetrics(self.sim))
+            initial_peb = 100
             min_peb_in_episode = initial_peb
-            max_peb_in_episode = initial_peb
-            peb_values_in_episode = [initial_peb]
+            max_peb_in_episode = -1
+            peb_values_in_episode = []
             
             # Initialize episode precoder
             step_counter = 0
@@ -170,6 +171,9 @@ class RISISACTrainer:
                 
                 # current_peb = float(self.eng.calculatePerformanceMetrics(self.sim))
                 next_matlab_state, reward, current_peb, rate, power, done = self.eng.step(self.sim, matlab_action, nargout=6)
+                if(step==1):
+                    initial_peb = current_peb
+                            
                 rate_values[episode].append(float(rate))
                 power_values[episode].append(float(power))
                 peb_ae[episode].append(current_peb)
@@ -196,7 +200,7 @@ class RISISACTrainer:
                 epsilon_start = max(epsilon_en, epsilon_start*epsilon_decay_rate)
                 
                 if done:
-                    prev_peb = current_peb
+                    # self.eng.reset(self.sim)
                     break
             
             
@@ -261,7 +265,7 @@ class RISISACTrainer:
                 print(f"Initial PEB: {initial_peb:.6f}")
                 # print(f"Min PEB: {min_peb_in_episode:.6f}")
                 # print(f"Max PEB: {max_peb_in_episode:.6f}")
-                # print(f"Avg PEB: {avg_peb_in_episode:.6f}")
+                print(f"Avg PEB: {avg_peb_in_episode:.6f}")
                 print(f"Last PEB: {last_peb_in_episode:.6f}")
                 print(f"Best PEB (all episodes): {self.best_metrics['peb']:.6f}")
                 print(f"Learning Rate: {self.agent.current_actor_lr:.6f}")

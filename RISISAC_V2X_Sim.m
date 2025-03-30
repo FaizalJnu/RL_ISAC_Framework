@@ -35,10 +35,8 @@ classdef RISISAC_V2X_Sim < handle
         rho_l = 3               % Direct path shadow fading
         rho_nl = 4              % RIS path shadow fading
         
-        starting_pos = [500,500,0]
+        % starting_pos = [500,500,0]
         % Locations (in meters)
-        bs_loc = [900, 100, 20]   % Base station location
-        ris_loc = [200, 300, 40]  % RIS location
         target_loc = [500, 500, 0]% Target location
 
         stepCount = 0;
@@ -46,7 +44,7 @@ classdef RISISAC_V2X_Sim < handle
         
         car_loc = [500,500,0];
         % Environment dimensions
-        env_dims = [1000, 1000]   % Environment dimensions
+        % env_dims = [1000, 1000]   % Environment dimensions
         destination;
         time = 0;
         arrival_threshold = 10
@@ -57,6 +55,9 @@ classdef RISISAC_V2X_Sim < handle
 
         minpeb = 10000;
         peb = 0;
+
+        visualizationAxes;
+        trajectory = [];
 
         % Channel matrices
         H_bt      % Direct channel
@@ -82,14 +83,22 @@ classdef RISISAC_V2X_Sim < handle
         % Simulation parameters
         dt = 0.1  % Time step in seconds
     end
+
+    properties (Constant)
+        bs_loc = [900, 100, 20];   % Base station location
+        ris_loc = [200, 300, 40];  % RIS location
+        starting_pos = [500, 500, 0]; % Starting position of the vehicle
+        env_dims = [1000, 1000] 
+    end
     
     methods
         function obj = RISISAC_V2X_Sim()
             % Initialize channels
             obj.initializeChannels();
             obj.calculated_values();
-            % obj.destination = [randi([990, 1000]), randi([990, 1000]), 0];
-            obj.destination = [999, 999, 0];
+            obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
+            obj.initializeVisualization();
+            % obj.destination = [999, 999, 0];
         end
 
         function nb = get_Nb(obj)
@@ -111,18 +120,14 @@ classdef RISISAC_V2X_Sim < handle
             obj.H_combined = HLos + HNLos;
 
             [Wx,W] = computeWx(obj);
-            % disp(W);
             obj.Pb = getpower(obj);
-            % disp(['Pb: ' num2str(obj.Pb)]);
             gamma_c_per_subcarrier = zeros(1, obj.Ns);
             for n = 1:obj.Ns
                 H_combined_n = HLos_3d(:,:,n) + HNLos_3d(:,:,n);
                 gamma_c_per_subcarrier(n) = obj.Pb * norm(H_combined_n * W, 'fro')^2 / obj.sigma_c^2;
             end
-            obj.gamma_c = mean(gamma_c_per_subcarrier);
-
-            obj.SNR = log10(obj.gamma_c);
-
+            obj.gamma_c = obj.Ns / sum(1 ./ gamma_c_per_subcarrier);  
+            obj.SNR = 10 * log10(obj.gamma_c);
             obj.rate = getrate(obj);
             obj.cc = obj.B * log2(1+obj.SNR);
             obj.R_min = obj.B*60;
@@ -305,9 +310,6 @@ classdef RISISAC_V2X_Sim < handle
             H_Los = mean(H_Los_3d, 3);  % Average across subcarriers (Nt×Nb matrix)
         end
         
-        
-        
-        
         function [H_NLoS, H_NLoS_3d] = generate_H_NLoS(obj, H_rt, H_br, Nt, Nr, Nb)
             K_dB = 4; 
             K = 10^(K_dB/10);
@@ -334,9 +336,6 @@ classdef RISISAC_V2X_Sim < handle
             % Calculate H_NLoS for each subcarrier
             for n = 1:obj.Ns
                 phase = exp(1j*2*pi*obj.B*(n-1)*tau_nl/obj.Ns);
-                
-                % Use the nth subcarrier slice from H_rt and H_br
-                % H_rt is Nt×Nr×Ns and H_br is Nr×Nb×Ns
                 H_NLoS_3d(:,:,n) = gamma_nl * obj.h_nl * H_rt(:,:,n) * obj.phi * H_br(:,:,n) * phase;
             end
             
@@ -366,136 +365,116 @@ classdef RISISAC_V2X_Sim < handle
             ];
             state = real(state);
             state = state(:)';
+            % disp(size(state));
         end
 
-        % function [next_state, reward, peb, rate, power, done] = step(obj, action)
-        %     ris_phases = action(1:obj.Nr);
-        %     obj.phi = diag(exp(1j * 2 * pi * ris_phases));
+        function initializeVisualization(obj)
+            figure;
+            obj.visualizationAxes = axes;
+            hold(obj.visualizationAxes, 'on');
+            grid(obj.visualizationAxes, 'on');
+            xlabel(obj.visualizationAxes, 'X Position (m)');
+            ylabel(obj.visualizationAxes, 'Y Position (m)');
+            zlabel(obj.visualizationAxes, 'Z Position (m)');
+            title(obj.visualizationAxes, '3D Trajectory of Vehicle with RIS and BS Locations');
+            view(obj.visualizationAxes, 3);
+            
+            obj.trajectory = obj.car_loc;
+        end
 
-        %     [peb] = obj.calculatePerformanceMetrics();
-        %     rate = getrate(obj);
-        %     power = getpower(obj);
-        %     reward = obj.computeReward(peb);
-        %     reward = sqrt((real(reward)^2) - (imag(reward)^2));
-
-        %     direction = (obj.destination - obj.car_loc) / norm(obj.destination - obj.car_loc);
-        %     obj.car_loc = obj.car_loc + direction * obj.speed * obj.dt;
-        %     obj.time = obj.time + obj.dt;
-            
-        %     obj.target_loc = obj.car_loc;
-        %     obj.stepCount = obj.stepCount + 1;
-            
-            
-        %     destination_reached = norm(obj.car_loc - obj.destination) < obj.arrival_threshold;
-        %     out_of_bounds = checkOutOfBounds(obj);
-        %     timeout = obj.stepCount >= obj.maxSteps;
-        %     done = destination_reached || out_of_bounds || timeout;
-            
-        %     next_state = getState(obj);
-        % end
+        function updateVisualization(obj)
+            % Clear previous plot
+            cla(obj.visualizationAxes);
+        
+            % Plot the vehicle's current location
+            plot3(obj.visualizationAxes, obj.car_loc(1), obj.car_loc(2), obj.car_loc(3), 'bo', 'MarkerSize', 8, 'DisplayName', 'Vehicle');
+        
+            % Plot the RIS location
+            plot3(obj.visualizationAxes, obj.ris_loc(1), obj.ris_loc(2), obj.ris_loc(3), 'rs', 'MarkerSize', 10, 'DisplayName', 'RIS');
+        
+            % Plot the BS location
+            plot3(obj.visualizationAxes, obj.bs_loc(1), obj.bs_loc(2), obj.bs_loc(3), 'g^', 'MarkerSize', 10, 'DisplayName', 'Base Station');
+        
+            % Plot the trajectory of the vehicle
+            plot3(obj.visualizationAxes, obj.trajectory(:,1), obj.trajectory(:,2), obj.trajectory(:,3), 'b-', 'DisplayName', 'Trajectory');
+        
+            % Update the legend
+            legend(obj.visualizationAxes, 'show');
+        
+            % Pause to update the plot
+            pause(0.01);
+        end
+        
+        function updateTrajectory(obj)
+            obj.trajectory = [obj.trajectory; obj.car_loc];
+        end        
+        
 
         function [next_state, reward, peb, rate, power, done] = step(obj, action)
-            % disp("taget location is?");
-            % disp(obj.target_loc);
-            % Update RIS Phases (Same as Before)
+            % Update RIS phases based on action
             ris_phases = action(1:obj.Nr);
-            % disp("this is ris_phases");
-            % disp(ris_phases);
             obj.phi = diag(exp(1j * 2 * pi * ris_phases));
-
-
-            % Compute Performance Metrics (Same as Before)
+        
+            % Calculate performance metrics
             peb = obj.calculatePerformanceMetrics();
             rate = getrate(obj);
             power = getpower(obj);
             reward = obj.computeReward(peb);
-            reward = sqrt((real(reward)^2) - (imag(reward)^2)); 
-
-            % ---- Vehicle Motion with PID Steering ----
-            
-            % Define motion parameters
-            max_speed = 30;  % Max speed (m/s)
-            max_acceleration = 2;  % Max acceleration (m/s^2)
-            max_turning_angle = pi/6;  % Max turn angle (30 degrees)
-            
-            % Compute desired direction (normalized)
+            reward = abs(reward); % Ensure reward is a real-valued scalar
+        
+            % Vehicle dynamics parameters
+            max_speed = 30; % Maximum speed in m/s
+            max_acceleration = 2; % Maximum acceleration in m/s^2
+            max_turning_angle = pi/6; % Maximum turning angle in radians
+        
+            % Compute desired direction and angle
             direction = (obj.destination - obj.car_loc) / norm(obj.destination - obj.car_loc);
-            
-            % Compute the desired angle for the car
-            desired_angle = atan2(direction(2), direction(1));  
-            current_angle = obj.car_orientation;  % Car's current orientation angle
-            
-            % Compute error for PID control
-            angle_error = desired_angle - current_angle;
-            
-            % PID Controller Parameters (Tunable)
-            Kp = 0.5;  % Proportional gain
-            Ki = 0.01; % Integral gain (optional)
-            Kd = 0.1;  % Derivative gain
-            
-            % Compute PID terms
-            obj.integral_error = obj.integral_error + angle_error * obj.dt;  % Accumulate integral term
-            derivative_error = (angle_error - obj.prev_error) / obj.dt;  % Compute derivative term
-            
-            % Compute Steering Correction using PID
+            desired_angle = atan2(direction(2), direction(1));
+            current_angle = obj.car_orientation;
+            angle_error = wrapToPi(desired_angle - current_angle);
+        
+            % PID control for steering
+            Kp = 0.5; Ki = 0.01; Kd = 0.1;
+            obj.integral_error = obj.integral_error + angle_error * obj.dt;
+            derivative_error = (angle_error - obj.prev_error) / obj.dt;
             steering_angle = Kp * angle_error + Ki * obj.integral_error + Kd * derivative_error;
-            
-            % Limit the turning angle
             steering_angle = max(-max_turning_angle, min(max_turning_angle, steering_angle));
-
-            % Update the car’s orientation
             obj.car_orientation = obj.car_orientation + steering_angle;
-
-            % Store previous error for next derivative calculation
             obj.prev_error = angle_error;
-
-            % Compute acceleration (simple model: accelerate if too slow, decelerate if too fast)
-            target_speed = obj.speed; % Desired speed
+        
+            % Speed control
+            target_speed = obj.speed;
             speed_diff = target_speed - obj.current_speed;
             acceleration = max(-max_acceleration, min(max_acceleration, speed_diff / obj.dt));
-            
-            % Update speed (limit by max speed)
             obj.current_speed = max(0, min(max_speed, obj.current_speed + acceleration * obj.dt));
-
-            % Compute new position based on updated speed and orientation
+        
+            % Update vehicle position
             obj.car_loc = obj.car_loc + [cos(obj.car_orientation), sin(obj.car_orientation), 0] * obj.current_speed * obj.dt;
             obj.target_loc = obj.car_loc;
-
-            % Update time
             obj.time = obj.time + obj.dt;
             obj.stepCount = obj.stepCount + 1;
-
-            % ---- Check Termination Conditions ----
-            destination_reached = norm(obj.car_loc - obj.destination) < obj.arrival_threshold;
-            
-            % Check if car is out of bounds (within env_dims)
-            out_of_bounds = (obj.car_loc(1) < 0 || obj.car_loc(1) > obj.env_dims(1) || ...
-                            obj.car_loc(2) < 0 || obj.car_loc(2) > obj.env_dims(2));
-
-            timeout = obj.stepCount >= obj.maxSteps;
-            done = destination_reached || out_of_bounds || timeout;
-
-            % Reset if out of bounds
-            if out_of_bounds
-                obj.car_loc = obj.target_loc; % Reset position
-                obj.car_orientation = 0; % Reset orientation
-                obj.current_speed = 0; % Stop car
-                obj.integral_error = 0; % Reset PID integral term
-                obj.prev_error = 0; % Reset PID previous error
-            end
-
-            % Get next state
-            next_state = getState(obj);
-        end
         
-
-        function out_of_bounds = checkOutOfBounds(obj)
-            if obj.car_loc(1) > 1000 || obj.car_loc(2) > 1000
-                out_of_bounds = true;
-            else
-                out_of_bounds = false;
+            % Update trajectory and visualization
+            obj.updateTrajectory();
+            obj.updateVisualization();
+        
+            % Check if destination reached or out of bounds
+            epsilon = 10.0; % Tolerance in meters
+            reached_dest = norm(obj.destination - obj.car_loc) < epsilon;
+            x = obj.car_loc(1);
+            y = obj.car_loc(2);
+            out_of_bounds = (x < 0 || x > obj.env_dims(1) || y < 0 || y > obj.env_dims(2));
+        
+            if reached_dest || out_of_bounds
+                % Assign a new random destination within environment bounds
+                obj.destination = [rand() * obj.env_dims(1), rand() * obj.env_dims(2), 0];
             end
-        end
+
+            done = obj.stepCount >= obj.maxSteps;
+        
+            % Retrieve the next state
+            next_state = getState(obj);
+        end        
 
         function reward = computeReward(obj, peb)
             % Q = 0.5;
@@ -509,40 +488,16 @@ classdef RISISAC_V2X_Sim < handle
                 reward = base_reward;
             end
 
-            % if (obj.peb > obj.minpeb)
-            %     reward = reward*-1;
-            % end
-
         end
 
-        function done = isEpisodeDone(obj)
-            % Check if vehicle has reached the destination
-            epsilon = 10.0; % Increased threshold to 5.0 meters for more reasonable arrival detection
-            reached_dest = norm(obj.car_loc - obj.destination) < epsilon;
-            
-            % Check if vehicle is out of bounds
-            pos = obj.car_loc;
-            out_of_bounds = any(pos(1:2) < 0) || ...
-                            pos(1) > obj.env_dims(1) || ...
-                            pos(2) > obj.env_dims(2);
-            
-            % Episode ends if the vehicle reaches its destination or goes out of bounds
-            done = reached_dest || out_of_bounds;
-            
-            % Optional: Add debug information
-            if done && reached_dest
-                disp(['Destination reached with final distance: ' num2str(norm(obj.car_loc - obj.destination))]);
-            elseif done && out_of_bounds
-                disp('Episode terminated: Out of bounds');
-            end
-        end
+        % ! -------------------- MACHINE LEARNING PART ENDS HERE --------------------
         
         
         function state = reset(obj)
             % Reset simulation state
             obj.initializeChannels();
             obj.calculated_values();
-            obj.destination = [randi([990, 1000]), randi([990, 1000]), 0];
+            obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
 
             obj.car_loc = obj.starting_pos;
             obj.target_loc = obj.car_loc;
@@ -649,7 +604,7 @@ classdef RISISAC_V2X_Sim < handle
                 penalty_factor = 1 + (obj.R_min - obj.rate)/obj.R_min;
                 obj.peb = obj.peb * penalty_factor;
             end
-            obj.peb = sqrt((real(obj.peb)^2) - (imag(obj.peb)^2))*100;
+            obj.peb = sqrt((real(obj.peb))^2 + (imag(obj.peb))^2)*10000000;
             % if(obj.peb < obj.minpeb)
             %     obj.minpeb = obj.peb;
             % else
@@ -688,10 +643,6 @@ classdef RISISAC_V2X_Sim < handle
             N = obj.Ns;  
             W = rand(obj.Nb, obj.Mb) + 1j*randn(obj.Nb, obj.Mb);
             W = W ./ vecnorm(W); 
-            
-            % disp("This is W:");
-            % disp(W);
-            % Initialize Wx with proper dimensions
             Wx = zeros(obj.Nb, N);
             
             % Generate a different X for each subcarrier
@@ -745,14 +696,14 @@ classdef RISISAC_V2X_Sim < handle
         % end        
         
         function [J, J_zao, T] = computeFisherInformationMatrix(obj)
-            % sigma_s = sqrt(obj.SNR/obj.Pb);  % Noise variance (placeholder)
+            % sigma_s = sqrt(obj.Pb/obj.gamma_c);  % Noise variance (placeholder)
             [T] = computeTransformationMatrix(obj);
             % [Wx,~] = computeWx(obj);
             % gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
             % gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
             
             % [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, obj.Ns, obj.B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
-            % [Jzao] = calculateJacobianMatrix(obj, obj.Pb, sigma_s, obj.Ns, Wx, A1, A2, A3, A4);
+            % [J_zao] = calculateJacobianMatrix(obj, obj.Pb, obj.Ns, Wx, A1, A2, A3, A4);
             H_Los_3d = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
             H_NLoS_3d = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
             J_zao = computeJZao(obj, H_Los_3d, H_NLoS_3d);
@@ -766,7 +717,7 @@ classdef RISISAC_V2X_Sim < handle
             B = obj.B;
             fc = obj.fc;
             c = physconst('LightSpeed');
-            N_ant_ris = 64^2;  % RIS elements
+            N_ant_ris = 64;  % RIS elements
             
             % Calculate frequency-dependent SNRs
             snr_direct = squeeze(mean(abs(H_Los).^2, [1 2])) / obj.noise_var;  % [Ns×1]
@@ -823,123 +774,121 @@ classdef RISISAC_V2X_Sim < handle
             end
         end 
 
-        % function [J_zao] = calculateJacobianMatrix(obj, Pb, sigma, N, Wx, A1, A2, A3, A4)
-        %     % TODO: Initialize 7x7 Jacobian matrix
-        %     J_zao = zeros(7, 7);
-        %     [~, ~, ~, ~, ~, ~, ~, angles] = computeGeometricParameters(obj);
-        %     psi_rt = angles.ris_to_target.aoa;
-        %     psi_bt = angles.bs_to_target_transmit;
-        %     psi_tb = angles.bs_to_target_receive;
-        %     psi_br = angles.bs_to_ris.azimuth;
-        %     phi_rt_a = angles.ris_to_target.azimuth;
-        %     phi_rt_e = angles.ris_to_target.elevation_angle;
-        %     phi_br_a = angles.bs_to_ris.elevation_azimuth;
-        %     phi_br_e = angles.bs_to_ris.elevation_angle;
+        function [J_zao] = calculateJacobianMatrix(obj, Pb, N, Wx, A1, A2, A3, A4)
+            % TODO: Initialize 7x7 Jacobian matrix
+            J_zao = zeros(7, 7);
+            [~, ~, ~, ~, ~, ~, ~, angles] = computeGeometricParameters(obj);
+            psi_rt = angles.ris_to_target.aoa;
+            psi_bt = angles.bs_to_target_transmit;
+            psi_tb = angles.bs_to_target_receive;
+            psi_br = angles.bs_to_ris.azimuth;
+            phi_rt_a = angles.ris_to_target.azimuth;
+            phi_rt_e = angles.ris_to_target.elevation_angle;
+            phi_br_a = angles.bs_to_ris.elevation_azimuth;
+            phi_br_e = angles.bs_to_ris.elevation_angle;
 
-        %     % Initialize a_rt with proper dimensions
-        %     % Initialize a_rt, a_bt, and a_tb with proper dimensions
-        %     a_rt = zeros(obj.Nt, obj.Ns);
-        %     a_bt = zeros(obj.Nb, obj.Ns);
-        %     a_tb = zeros(obj.Nt, obj.Ns);
+            % Initialize a_rt with proper dimensions
+            % Initialize a_rt, a_bt, and a_tb with proper dimensions
+            a_rt = zeros(obj.Nt, obj.Ns);
+            a_bt = zeros(obj.Nb, obj.Ns);
+            a_tb = zeros(obj.Nt, obj.Ns);
 
-        %     % Calculate for each subcarrier
-        %     for n = 1:obj.Ns
-        %         % For a_rt - we need a column vector, not a diagonal matrix
-        %         indices = (0:(obj.Nt-1))';  % Column vector of indices
-        %         a_rt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_rt) * indices;
+            % Calculate for each subcarrier
+            for n = 1:obj.Ns
+                % For a_rt - we need a column vector, not a diagonal matrix
+                indices = (0:(obj.Nt-1))';  % Column vector of indices
+                a_rt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_rt) * indices;
                 
-        %         % For a_bt
-        %         indices_b = (0:(obj.Nb-1))';
-        %         a_bt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_bt) * indices_b;
+                % For a_bt
+                indices_b = (0:(obj.Nb-1))';
+                a_bt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_bt) * indices_b;
                 
-        %         % For a_tb
-        %         a_tb(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_tb) * indices;
-        %     end
+                % For a_tb
+                a_tb(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_tb) * indices;
+            end
 
-        %     % Initialize arrays for a_rt_a and a_rt_e
-        %     a_rt_a = zeros(obj.Nr, obj.Ns);
-        %     a_rt_e = zeros(obj.Nr, obj.Ns);
+            % Initialize arrays for a_rt_a and a_rt_e
+            a_rt_a = zeros(obj.Nr, obj.Ns);
+            a_rt_e = zeros(obj.Nr, obj.Ns);
 
-        %     % Calculate a_rt_a and a_rt_e for each subcarrier
-        %     for n = 1:obj.Ns
-        %         a_rt_a(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * ((obj.Nx-1) * cos(phi_rt_a) * sin(phi_rt_e));
-        %         a_rt_e(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * (((obj.Nx-1) * sin(phi_rt_a) * cos(phi_rt_e)) - ((obj.Ny-1) * sin(phi_rt_e)));
-        %     end
+            % Calculate a_rt_a and a_rt_e for each subcarrier
+            for n = 1:obj.Ns
+                a_rt_a(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * ((obj.Nx-1) * cos(phi_rt_a) * sin(phi_rt_e));
+                a_rt_e(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * (((obj.Nx-1) * sin(phi_rt_a) * cos(phi_rt_e)) - ((obj.Ny-1) * sin(phi_rt_e)));
+            end
 
-        %     % TODO: implement all the a vector
-        %     a_vec = compute_a_psi(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2);
-        %     a_psi_bt = a_vec;
-        %     a_vec = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2);
-        %     a_psi_tb = a_vec;
-        %     a_vec = compute_a_psi(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2);
-        %     a_psi_rt = a_vec;
-        %     a_vec = compute_a_psi(obj, obj.Nb, psi_br, obj.lambda, obj.lambda/2);
-        %     a_psi_br = a_vec;
+            % TODO: implement all the a vector
+            a_vec = compute_a_psi(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2);
+            a_psi_bt = a_vec;
+            a_vec = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2);
+            a_psi_tb = a_vec;
+            a_vec = compute_a_psi(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2);
+            a_psi_rt = a_vec;
+            a_vec = compute_a_psi(obj, obj.Nb, psi_br, obj.lambda, obj.lambda/2);
+            a_psi_br = a_vec;
 
 
-        %     % TODO: implement all the steering vector
-        %     a_phi_br = compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2);
-        %     a_phi_rt = compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, obj.lambda, obj.lambda/2);
+            % TODO: implement all the steering vector
+            a_phi_br = compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2);
+            a_phi_rt = compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, obj.lambda, obj.lambda/2);
 
-        %     for n = 1:N
-        %         % Calculate all partial derivatives
-        %         d_mu_array = cell(7, 1);
+            for n = 1:N
+                % Calculate all partial derivatives
+                d_mu_array = cell(7, 1);
                 
-        %         % Extract the nth column from each steering vector matrix
-        %         a_psi_bt_n = a_psi_bt(:,n);
-        %         a_psi_tb_n = a_psi_tb(:,n);
-        %         a_psi_rt_n = a_psi_rt(:,n);
-        %         a_psi_br_n = a_psi_br(:,n);
-        %         a_phi_rt_n = a_phi_rt(:,n);
-        %         a_phi_br_n = a_phi_br(:,n);
+                % Extract the nth column from each steering vector matrix
+                a_psi_bt_n = a_psi_bt(:,n);
+                a_psi_tb_n = a_psi_tb(:,n);
+                a_psi_rt_n = a_psi_rt(:,n);
+                a_psi_br_n = a_psi_br(:,n);
+                a_phi_rt_n = a_phi_rt(:,n);
+                a_phi_br_n = a_phi_br(:,n);
                 
-        %         % Extract the nth element from amplitude matrices
-        %         A1_n = A1(n);
-        %         A2_n = A2(n);
-        %         A3_n = A3(n);
-        %         A4_n = A4(n);
+                % Extract the nth element from amplitude matrices
+                A1_n = A1(n);
+                A2_n = A2(n);
+                A3_n = A3(n);
+                A4_n = A4(n);
                 
-        %         % Partial derivatives with respect to each parameter
-        %         % d_mu_d_tau_l
-        %         d_mu_array{1} = (A1_n * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
+                % Partial derivatives with respect to each parameter
+                % d_mu_d_tau_l
+                d_mu_array{1} = (A1_n * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
                 
-        %         % d_mu_d_tau_nl
-        %         d_mu_array{2} = (A2_n * a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
+                % d_mu_d_tau_nl
+                d_mu_array{2} = (A2_n * a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
                 
-        %         d_mu_array{3} = A3_n * (a_rt(:,n) .* a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
+                d_mu_array{3} = A3_n * (a_rt(:,n) .* a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
 
-        %         % d_mu_d_phi_rt_a
-        %         d_mu_array{4} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_a(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
+                % d_mu_d_phi_rt_a
+                d_mu_array{4} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_a(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
                 
-        %         % d_mu_d_phi_rt_e
-        %         d_mu_array{5} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_e(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
+                % d_mu_d_phi_rt_e
+                d_mu_array{5} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_e(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
                 
-        %         % d_mu_d_psi_br
-        %         d_mu_array{6} = (A4_n * a_bt(:,n)' * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
+                % d_mu_d_psi_br
+                d_mu_array{6} = (A4_n * a_bt(:,n)' * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
                 
-        %         d_mu_array{7} = A4_n * (a_tb(:,n) .* a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
+                d_mu_array{7} = A4_n * (a_tb(:,n) .* a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
 
-        %         % Calculate Jacobian matrix elements
-        %         for i = 1:7
-        %             for j = 1:7
-        %                 % Get the sizes of the current derivatives
-        %                 [rows_i, cols_i] = size(d_mu_array{i});
-        %                 [rows_j, cols_j] = size(d_mu_array{j});
+                % Calculate Jacobian matrix elements
+                for i = 1:7
+                    for j = 1:7
+                        % Get the sizes of the current derivatives
+                        [rows_i, cols_i] = size(d_mu_array{i});
+                        [rows_j, cols_j] = size(d_mu_array{j});
                         
-        %                 % Compute the FIM entry based on dimensions
-        %                 if rows_i == rows_j && cols_i == cols_j
-        %                     % If dimensions match, use dot product
-        %                     J_zao(i,j) = J_zao(i,j) + real(sum(sum(conj(d_mu_array{i}) .* d_mu_array{j})));
-        %                 else
-        %                     J_zao(i,j) = J_zao(i,j) + real(sum(sum(d_mu_array{i} * d_mu_array{j}')));
-        %                 end
-        %             end
-        %         end                
-        %     end
-        %     obj.Jzao = J_zao;
-        %     disp("This is J_zao");
-        %     disp(J_zao);
-        % end                         
+                        % Compute the FIM entry based on dimensions
+                        if rows_i == rows_j && cols_i == cols_j
+                            % If dimensions match, use dot product
+                            J_zao(i,j) = J_zao(i,j) + real(sum(sum(conj(d_mu_array{i}) .* d_mu_array{j})));
+                        else
+                            J_zao(i,j) = J_zao(i,j) + real(sum(sum(d_mu_array{i} * d_mu_array{j}')));
+                        end
+                    end
+                end                
+            end
+            obj.Jzao = J_zao;
+        end                         
         % ! -------------------- PEB COMPUTATION PART ENDS HERE --------------------        
 
     end
