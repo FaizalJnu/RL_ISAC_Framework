@@ -4,6 +4,7 @@ from flddpg import FLDDPG  # Import our DDPG implementation
 import torch
 import matplotlib.pyplot as plt
 import os
+import time
 
 class RISISACTrainer:
     def __init__(self):
@@ -138,6 +139,7 @@ class RISISACTrainer:
         power_values = [[] for _ in range(300)]
         avg_power = []
         for episode in range(num_episodes):
+            episode_start_time = time.time()
             # Reset environment
             matlab_state = self.eng.reset(self.sim)
             state = self.process_state(matlab_state)
@@ -203,6 +205,8 @@ class RISISACTrainer:
                     # self.eng.reset(self.sim)
                     break
             
+            episode_time = time.time() - episode_start_time
+            print(f"Episode {episode+1} completed in {episode_time:.2f} seconds")
             
             # Calculate average PEB for the episode
             avg_peb_in_episode = sum(peb_values_in_episode) / len(peb_values_in_episode)

@@ -458,9 +458,9 @@ classdef RISISAC_V2X_Sim < handle
                 obj.car_orientation = 0; % Start facing along the x-axis
                 % Force car to start at starting_pos at beginning of episode
                 obj.car_loc = obj.starting_pos;
-                disp('*** EPISODE INITIALIZED ***');
-                disp(['Car initialized at: [', num2str(obj.car_loc), ']']);
-                disp(['First destination: [', num2str(obj.destination), ']']);
+                % disp('*** EPISODE INITIALIZED ***');
+                % disp(['Car initialized at: [', num2str(obj.car_loc), ']']);
+                % disp(['First destination: [', num2str(obj.destination), ']']);
             end
             
             % Define waypoint for current index
@@ -484,14 +484,14 @@ classdef RISISAC_V2X_Sim < handle
             end
             
             % Debug - print current information
-            if mod(obj.stepCount, 20) == 0 % Print every 20 steps
-                disp(['Step: ', num2str(obj.stepCount), ...
-                      ', Waypoint: ', num2str(obj.waypoint_idx), ...
-                      ', Car at: [', num2str(obj.car_loc), ']', ...
-                      ', Destination: [', num2str(obj.destination), ']', ...
-                      ', Speed: ', num2str(obj.current_speed), ...
-                      ', Orientation: ', num2str(obj.car_orientation * 180/pi), ' deg']);
-            end
+            % if mod(obj.stepCount, 20) == 0 % Print every 20 steps
+            %     disp(['Step: ', num2str(obj.stepCount), ...
+            %           ', Waypoint: ', num2str(obj.waypoint_idx), ...
+            %           ', Car at: [', num2str(obj.car_loc), ']', ...
+            %           ', Destination: [', num2str(obj.destination), ']', ...
+            %           ', Speed: ', num2str(obj.current_speed), ...
+            %           ', Orientation: ', num2str(obj.car_orientation * 180/pi), ' deg']);
+            % end
             
             % Compute desired direction and angle
             vec_to_dest = obj.destination - obj.car_loc;
@@ -502,7 +502,7 @@ classdef RISISAC_V2X_Sim < handle
             if dist_to_dest < epsilon
                 % We've reached the destination - move to next waypoint
                 obj.waypoint_idx = mod(obj.waypoint_idx, 8) + 1;
-                disp(['*** WAYPOINT REACHED! Moving to waypoint #', num2str(obj.waypoint_idx), ' ***']);
+                % disp(['*** WAYPOINT REACHED! Moving to waypoint #', num2str(obj.waypoint_idx), ' ***']);
             else
                 % Continue moving toward destination
                 % Normalize direction vector
@@ -532,11 +532,11 @@ classdef RISISAC_V2X_Sim < handle
                 obj.car_loc = obj.car_loc + movement;
                 
                 % Debug - check if car moved
-                if norm(movement) < 0.1
-                    disp('WARNING: Minimal movement detected!');
-                    disp(['Movement vector: [', num2str(movement), ']']);
-                    disp(['Orientation: ', num2str(obj.car_orientation * 180/pi), ' degrees']);
-                end
+                % if norm(movement) < 0.1
+                %     disp('WARNING: Minimal movement detected!');
+                %     disp(['Movement vector: [', num2str(movement), ']']);
+                %     disp(['Orientation: ', num2str(obj.car_orientation * 180/pi), ' degrees']);
+                % end
             end
             
             obj.target_loc = obj.car_loc;
