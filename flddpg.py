@@ -331,18 +331,17 @@ class PrioritizedReplayBuffer:
         return self.tree.size
 
 class FLDDPG:
-    def __init__(self, state_dim, action_dim, hidden_dims=[400, 300], buffer_size=10000,
-                 batch_size=16, gamma=0.95, tau=0.00001, actor_lr=1e-3, critic_lr=1e-3,
-                 lr_decay_rate=0.00001, min_lr=1e-6):
-        
-        #? Selecting GPU based on device
+    def __init__(self, state_dim, action_dim, hidden_dims, buffer_size, 
+             batch_size, gamma, tau, actor_lr, critic_lr,
+             lr_decay_rate, min_lr):
+    # Device selection code remains the same
         if(torch.backends.mps.is_available()):
             print("M1 GPU is available")
             self.device = torch.device("mps")
         else:
             print("Nvidia GPU is available")
             self.device = torch.device("cuda")
-        
+            
         self.target_actor = TargetActorNetwork(
             state_dim=state_dim,
             action_dim=action_dim,
@@ -359,11 +358,13 @@ class FLDDPG:
         
         self.actor = self.target_actor.get_online_network()
         self.critic = self.target_critic.get_online_network()
+        
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)
+        
         self.gamma = gamma
         self.batch_size = batch_size
-        # self.replay_buffer = ReplayBuffer(buffer_size, state_dim)
+        
         self.replay_buffer = PrioritizedReplayBuffer(
             capacity=buffer_size,
             state_dim=state_dim,
@@ -371,33 +372,47 @@ class FLDDPG:
             beta=0.4,   # Initial importance sampling weight
             beta_increment=0.001  # Beta annealing rate
         )
-
+        
+        # Learning rate settings
         self.initial_actor_lr = actor_lr
         self.initial_critic_lr = critic_lr
-        self.lr_decay_rate = lr_decay_rate
+        self.lr_decay_rate = lr_decay_rate  # Should be like 0.99 or 0.999 for exponential decay
         self.min_lr = min_lr
         self.current_actor_lr = actor_lr
         self.current_critic_lr = critic_lr
-
+        
+        # Fix: Use correct decay rate for ExponentialLR
+        # For a decay of 0.00001 per step, gamma should be (1 - 0.00001) = 0.99999
+        decay_gamma = 1.0 - lr_decay_rate  # Convert your decay rate to scheduler's gamma
+        
         self.actor_scheduler = optim.lr_scheduler.ExponentialLR(
-            optimizer=self.actor_optimizer, 
-            gamma=lr_decay_rate
+            optimizer=self.actor_optimizer,
+            gamma=decay_gamma,  # Changed from lr_decay_rate to decay_gamma  # Debug print
         )
+        
         self.critic_scheduler = optim.lr_scheduler.ExponentialLR(
-            optimizer=self.critic_optimizer, 
-            gamma=lr_decay_rate
+            optimizer=self.critic_optimizer,
+            gamma=decay_gamma  # Changed from lr_decay_rate to decay_gamma
         )
+    
+    def get_current_actor_lr(self):
+        return self.actor_optimizer.param_groups[0]['lr']
 
     def decay_learning_rates(self):
+        # Step the schedulers
         self.actor_scheduler.step()
+        self.critic_scheduler.step()
+        
+        # Enforce minimum learning rate
         for param_group in self.actor_optimizer.param_groups:
             param_group['lr'] = max(param_group['lr'], self.min_lr)
         self.current_actor_lr = self.actor_optimizer.param_groups[0]['lr']
-        self.critic_scheduler.step()
+        # print("Current actor learning rate:", self.current_actor_lr)  # Debug print
+        
         for param_group in self.critic_optimizer.param_groups:
             param_group['lr'] = max(param_group['lr'], self.min_lr)
-        self.current_critic_lr = self.critic_optimizer.param_groups[0]['lr']
-        
+        self.current_critic_lr = self.critic_optimizer.param_groups[0]['lr']  
+          
     def select_action(self, state, explore, epsilon):
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():

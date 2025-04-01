@@ -36,6 +36,11 @@ classdef RISISAC_V2X_Sim < handle
         pathProgress = 0;           % No progress on the path initially
         minTurningRadius = 5;       % Minimum turning radius for Dubins path
 
+        center = [250,250,0]; % Center of circular path
+        radius = 250;
+        angular_speed = 0.04;
+        angle
+
         % Define waypoints: [x, y, theta]
         waypoints = [
             0, 0, 0;
@@ -109,6 +114,24 @@ classdef RISISAC_V2X_Sim < handle
         starting_pos = [500, 500, 0]; % Starting position of the vehicle
         env_dims = [1000, 1000] 
     end
+    methods (Access = private)
+        function initializeEpisode(obj)
+            fprintf("Initializing Episode...\n");
+            obj.center = [250, 250, 0]; % Center of circular path
+            obj.radius = 250; % Radius of circular path in meters
+            obj.angular_speed = 0.04; % Angular speed in radians per second
+            obj.car_loc = [500, 500, 0];
+        
+            % Force correct starting angle (45 degrees for quadrant I motion)
+            obj.angle = atan2(obj.car_loc(2) - obj.center(2), obj.car_loc(1) - obj.center(1));
+        
+            % Set initial orientation tangent to the circle
+            obj.car_orientation = obj.angle + pi/2;
+        
+            % Debugging statement
+            fprintf("Initial Car Location: (%.2f, %.2f)\n", obj.car_loc(1), obj.car_loc(2));
+        end        
+    end       
     
     methods
         function obj = RISISAC_V2X_Sim()
@@ -427,6 +450,7 @@ classdef RISISAC_V2X_Sim < handle
         function updateTrajectory(obj)
             obj.trajectory = [obj.trajectory; obj.car_loc];
         end        
+        
 
         function [next_state, reward, peb, rate, power, done] = step(obj, action)
             % Update RIS phases based on action
@@ -440,106 +464,34 @@ classdef RISISAC_V2X_Sim < handle
             reward = obj.computeReward(peb);
             reward = abs(reward); % Ensure reward is a real-valued scalar
             
-            % Vehicle dynamics parameters
-            max_speed = 30; % Maximum speed in m/s
-            max_acceleration = 2; % Maximum acceleration in m/s^2
-            max_turning_angle = pi/6; % Maximum turning angle in radians
-            
             % Initialize properties only once per episode
-            % Create a persistent variable to track initialization status
             persistent isInitialized;
             if isempty(isInitialized) || obj.stepCount == 0
                 isInitialized = true;
-                obj.waypoint_idx = 1;
-                obj.destination = [1000, 500, 0]; % First destination
-                obj.integral_error = 0;
-                obj.prev_error = 0;
-                obj.current_speed = 10; % Start with a non-zero speed
-                obj.car_orientation = 0; % Start facing along the x-axis
-                % Force car to start at starting_pos at beginning of episode
-                obj.car_loc = obj.starting_pos;
-                % disp('*** EPISODE INITIALIZED ***');
-                % disp(['Car initialized at: [', num2str(obj.car_loc), ']']);
-                % disp(['First destination: [', num2str(obj.destination), ']']);
+                obj.center = [250, 500, 0]; % Center of circular path
+                obj.radius = 250; % Radius of circular path in meters
+                obj.angular_speed = 0.08; % Angular speed in radians per second
+                obj.angle = 0; % Initial angle
+                % Force car to start at a position on the circle
+                obj.car_loc = obj.center + [obj.radius, 0, 0];
+                obj.car_orientation = pi/2; % Start with orientation tangent to circle
             end
             
-            % Define waypoint for current index
-            switch obj.waypoint_idx
-                case 1
-                    obj.destination = [1000, 500, 0]; % First destination
-                case 2
-                    obj.destination = obj.starting_pos; % Return to start
-                case 3
-                    obj.destination = [500, 1000, 0]; % Second destination
-                case 4
-                    obj.destination = obj.starting_pos; % Return to start
-                case 5
-                    obj.destination = [500, 0, 0]; % Third destination
-                case 6
-                    obj.destination = obj.starting_pos; % Return to start
-                case 7
-                    obj.destination = [0, 500, 0]; % Fourth destination
-                case 8
-                    obj.destination = obj.starting_pos; % Return to start
-            end
+            % Update angle for circular motion
+            obj.angle = obj.angle + obj.angular_speed * obj.dt;
             
-            % Debug - print current information
-            % if mod(obj.stepCount, 20) == 0 % Print every 20 steps
-            %     disp(['Step: ', num2str(obj.stepCount), ...
-            %           ', Waypoint: ', num2str(obj.waypoint_idx), ...
-            %           ', Car at: [', num2str(obj.car_loc), ']', ...
-            %           ', Destination: [', num2str(obj.destination), ']', ...
-            %           ', Speed: ', num2str(obj.current_speed), ...
-            %           ', Orientation: ', num2str(obj.car_orientation * 180/pi), ' deg']);
-            % end
+            % Calculate new position on the circle
+            new_x = obj.center(1) + obj.radius * cos(obj.angle);
+            new_y = obj.center(2) + obj.radius * sin(obj.angle);
+            obj.car_loc = [new_x, new_y, 0];
             
-            % Compute desired direction and angle
-            vec_to_dest = obj.destination - obj.car_loc;
-            dist_to_dest = norm(vec_to_dest);
+            % Update car orientation to be tangent to the circle
+            obj.car_orientation = obj.angle + pi/2;
             
-            % Check if destination reached
-            epsilon = 10.0; % Tolerance in meters
-            if dist_to_dest < epsilon
-                % We've reached the destination - move to next waypoint
-                obj.waypoint_idx = mod(obj.waypoint_idx, 8) + 1;
-                % disp(['*** WAYPOINT REACHED! Moving to waypoint #', num2str(obj.waypoint_idx), ' ***']);
-            else
-                % Continue moving toward destination
-                % Normalize direction vector
-                direction = vec_to_dest / dist_to_dest;
-                
-                % Calculate desired orientation
-                desired_angle = atan2(direction(2), direction(1));
-                current_angle = obj.car_orientation;
-                angle_error = wrapToPi(desired_angle - current_angle);
-                
-                % PID control for steering
-                Kp = 0.5; Ki = 0.01; Kd = 0.1;
-                obj.integral_error = obj.integral_error + angle_error * obj.dt;
-                derivative_error = (angle_error - obj.prev_error) / obj.dt;
-                steering_angle = Kp * angle_error + Ki * obj.integral_error + Kd * derivative_error;
-                steering_angle = max(-max_turning_angle, min(max_turning_angle, steering_angle));
-                obj.car_orientation = obj.car_orientation + steering_angle;
-                obj.prev_error = angle_error;
-                
-                % FORCE a non-zero speed (critical fix)
-                obj.current_speed = 20; % Fixed speed for reliable movement
-                
-                % Calculate movement vector based on orientation and speed
-                movement = [cos(obj.car_orientation), sin(obj.car_orientation), 0] * obj.current_speed * obj.dt;
-                
-                % Update car position
-                obj.car_loc = obj.car_loc + movement;
-                
-                % Debug - check if car moved
-                % if norm(movement) < 0.1
-                %     disp('WARNING: Minimal movement detected!');
-                %     disp(['Movement vector: [', num2str(movement), ']']);
-                %     disp(['Orientation: ', num2str(obj.car_orientation * 180/pi), ' degrees']);
-                % end
-            end
-            
+            % Update target location to match car location
             obj.target_loc = obj.car_loc;
+            
+            % Update time and step count
             obj.time = obj.time + obj.dt;
             obj.stepCount = obj.stepCount + 1;
             
@@ -552,7 +504,114 @@ classdef RISISAC_V2X_Sim < handle
             
             % Retrieve the next state
             next_state = getState(obj);
-        end  
+        end
+                
+
+        % function [next_state, reward, peb, rate, power, done] = step(obj, action)
+        %     % Update RIS phases based on action
+        %     ris_phases = action(1:obj.Nr);
+        %     obj.phi = diag(exp(1j * 2 * pi * ris_phases));
+            
+        %     % Calculate performance metrics
+        %     peb = obj.calculatePerformanceMetrics();
+        %     rate = getrate(obj);
+        %     power = getpower(obj);
+        %     reward = obj.computeReward(peb);
+        %     reward = abs(reward); % Ensure reward is a real-valued scalar
+            
+        %     % Vehicle dynamics parameters
+        %     max_speed = 30; % Maximum speed in m/s
+        %     max_acceleration = 2; % Maximum acceleration in m/s^2
+        %     max_turning_angle = pi/6; % Maximum turning angle in radians
+            
+        %     % Initialize properties only once per episode
+        %     % Create a persistent variable to track initialization status
+        %     persistent isInitialized;
+        %     if isempty(isInitialized) || obj.stepCount == 0
+        %         isInitialized = true;
+        %         obj.waypoint_idx = 1;
+        %         obj.destination = [1000, 500, 0]; % First destination
+        %         obj.integral_error = 0;
+        %         obj.prev_error = 0;
+        %         obj.current_speed = 10; % Start with a non-zero speed
+        %         obj.car_orientation = 0; % Start facing along the x-axis
+        %         % Force car to start at starting_pos at beginning of episode
+        %         obj.car_loc = obj.starting_pos;
+        %     end
+            
+        %     % Define waypoint for current index
+        %     switch obj.waypoint_idx
+        %         case 1
+        %             obj.destination = [1000, 500, 0]; % First destination
+        %         case 2
+        %             obj.destination = obj.starting_pos; % Return to start
+        %         case 3
+        %             obj.destination = [500, 1000, 0]; % Second destination
+        %         case 4
+        %             obj.destination = obj.starting_pos; % Return to start
+        %         case 5
+        %             obj.destination = [500, 0, 0]; % Third destination
+        %         case 6
+        %             obj.destination = obj.starting_pos; % Return to start
+        %         case 7
+        %             obj.destination = [0, 500, 0]; % Fourth destination
+        %         case 8
+        %             obj.destination = obj.starting_pos; % Return to start
+        %     end
+            
+        %     % Compute desired direction and angle
+        %     vec_to_dest = obj.destination - obj.car_loc;
+        %     dist_to_dest = norm(vec_to_dest);
+            
+        %     % Check if destination reached
+        %     epsilon = 10.0; % Tolerance in meters
+        %     if dist_to_dest < epsilon
+        %         % We've reached the destination - move to next waypoint
+        %         obj.waypoint_idx = mod(obj.waypoint_idx, 8) + 1;
+        %         % disp(['*** WAYPOINT REACHED! Moving to waypoint #', num2str(obj.waypoint_idx), ' ***']);
+        %     else
+        %         % Continue moving toward destination
+        %         % Normalize direction vector
+        %         direction = vec_to_dest / dist_to_dest;
+                
+        %         % Calculate desired orientation
+        %         desired_angle = atan2(direction(2), direction(1));
+        %         current_angle = obj.car_orientation;
+        %         angle_error = wrapToPi(desired_angle - current_angle);
+                
+        %         % PID control for steering
+        %         Kp = 0.5; Ki = 0.01; Kd = 0.1;
+        %         obj.integral_error = obj.integral_error + angle_error * obj.dt;
+        %         derivative_error = (angle_error - obj.prev_error) / obj.dt;
+        %         steering_angle = Kp * angle_error + Ki * obj.integral_error + Kd * derivative_error;
+        %         steering_angle = max(-max_turning_angle, min(max_turning_angle, steering_angle));
+        %         obj.car_orientation = obj.car_orientation + steering_angle;
+        %         obj.prev_error = angle_error;
+                
+        %         % FORCE a non-zero speed (critical fix)
+        %         obj.current_speed = 20; % Fixed speed for reliable movement
+                
+        %         % Calculate movement vector based on orientation and speed
+        %         movement = [cos(obj.car_orientation), sin(obj.car_orientation), 0] * obj.current_speed * obj.dt;
+                
+        %         % Update car position
+        %         obj.car_loc = obj.car_loc + movement;
+        %     end
+            
+        %     obj.target_loc = obj.car_loc;
+        %     obj.time = obj.time + obj.dt;
+        %     obj.stepCount = obj.stepCount + 1;
+            
+        %     % Update trajectory and visualization
+        %     obj.updateTrajectory();
+        %     obj.updateVisualization();
+            
+        %     % Check if episode is done
+        %     done = obj.stepCount >= obj.maxSteps;
+            
+        %     % Retrieve the next state
+        %     next_state = getState(obj);
+        % end  
         
 
         % function [next_state, reward, peb, rate, power, done] = step(obj, action)

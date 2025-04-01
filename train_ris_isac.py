@@ -126,7 +126,7 @@ class RISISACTrainer:
     
     def train(self, num_episodes, max_steps, target_peb):
         print("Starting training...")
-        Nb = self.eng.get_Nb(self.sim)
+        # Nb = self.eng.get_Nb(self.sim)
         
         epsilon_start = 1.0
         epsilon_en = 0.01
@@ -154,6 +154,10 @@ class RISISACTrainer:
             
             # Initialize episode precoder
             step_counter = 0
+
+            if(episode!=0):
+                self.agent.decay_learning_rates()
+
             
             for step in range(max_steps):
 
@@ -204,7 +208,7 @@ class RISISACTrainer:
                 if done:
                     # self.eng.reset(self.sim)
                     break
-            
+
             episode_time = time.time() - episode_start_time
             print(f"Episode {episode+1} completed in {episode_time:.2f} seconds")
             
@@ -256,10 +260,6 @@ class RISISACTrainer:
                 self.best_metrics['peb'] = min_peb_in_episode
                 self.best_metrics['peb_episode'] = episode
                 self.save_checkpoint(episode, self.metrics, 'best_peb')
-
-            
-            # Decay learning rates
-            decay_rate = self.agent.decay_learning_rates()
             
             # Print progress
             if episode % 1 == 0:
@@ -272,9 +272,8 @@ class RISISACTrainer:
                 print(f"Avg PEB: {avg_peb_in_episode:.6f}")
                 print(f"Last PEB: {last_peb_in_episode:.6f}")
                 print(f"Best PEB (all episodes): {self.best_metrics['peb']:.6f}")
-                print(f"Learning Rate: {self.agent.current_actor_lr:.6f}")
+                print(f"Learning Rate: {self.agent.get_current_actor_lr():.12f}")
                 print(f"Buffer Size: {len(self.agent.replay_buffer)}")
-                print(f"Decay rate is: {decay_rate}")
                 print("-" * 50)
             
             # Early stopping check
