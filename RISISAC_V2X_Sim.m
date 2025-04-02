@@ -429,8 +429,7 @@ classdef RISISAC_V2X_Sim < handle
             % Update RIS phases based on action
             ris_phases = action(1:obj.Nr);
             obj.phi = diag(exp(1j * 2 * pi * ris_phases));
-            
-            obj.initializeChannels()
+
             obj.calculated_values()
             
             % Calculate performance metrics
@@ -660,18 +659,16 @@ classdef RISISAC_V2X_Sim < handle
             % Q = 0.5;
             constraints_satisfied = (obj.rate >= obj.R_min);
 
-            base_reward = 1 / (1 + peb);  % Keeps reward bounded [0,1]
+            base_reward = 1 / peb;  % Keeps reward bounded [0,1]
             
             if ~constraints_satisfied
-                reward = base_reward * (0.5 + 0.5 * (obj.rate / obj.R_min)); 
+                % reward = base_reward * (0.5 + 0.5 * (obj.rate / obj.R_min)); 
+                reward = base_reward * 0.5;
             else
                 reward = base_reward;
             end
 
         end
-
-        % ! -------------------- MACHINE LEARNING PART ENDS HERE --------------------
-        
         
         function state = reset(obj)
             % Reset simulation state
@@ -787,7 +784,8 @@ classdef RISISAC_V2X_Sim < handle
                 penalty_factor = 1 + (obj.R_min - obj.rate)/obj.R_min;
                 obj.peb = obj.peb * penalty_factor;
             end
-            obj.peb = sqrt((real(obj.peb))^2 + (imag(obj.peb))^2)*10000000;
+            obj.peb = sqrt((real(obj.peb))^2 + (imag(obj.peb))^2)*100;
+            obj.peb = 1+11/(1+exp(-(obj.peb-6.5)));
             % if(obj.peb < obj.minpeb)
             %     obj.minpeb = obj.peb;
             % else
@@ -883,56 +881,56 @@ classdef RISISAC_V2X_Sim < handle
         function [J, J_zao, T] = computeFisherInformationMatrix(obj)
             % sigma_s = sqrt(obj.Pb/obj.gamma_c);  % Noise variance (placeholder)
             [T] = computeTransformationMatrix(obj);
-            % [Wx,~] = computeWx(obj);
-            % gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
-            % gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
+            [Wx,~] = computeWx(obj);
+            gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
+            gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
             
-            % [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, obj.Ns, obj.B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
-            % [J_zao] = calculateJacobianMatrix(obj, obj.Pb, obj.Ns, Wx, A1, A2, A3, A4);
-            H_Los_3d = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
-            H_NLoS_3d = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
-            J_zao = computeJZao(obj, H_Los_3d, H_NLoS_3d);
+            [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, obj.Ns, obj.B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
+            [J_zao] = calculateJacobianMatrix(obj, obj.Pb, obj.Ns, Wx, A1, A2, A3, A4);
+            % H_Los_3d = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
+            % H_NLoS_3d = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
+            % J_zao = computeJZao(obj, H_Los_3d, H_NLoS_3d);
 
             % Compute final Fisher Information Matrix
             J = T * J_zao * T';
         end
 
-        function J_zao = computeJZao(obj, H_Los, H_NLoS)
-            % Extract parameters from object
-            B = obj.B;
-            fc = obj.fc;
-            c = physconst('LightSpeed');
-            N_ant_ris = 64;  % RIS elements
+        % function J_zao = computeJZao(obj, H_Los, H_NLoS)
+        %     % Extract parameters from object
+        %     B = obj.B;
+        %     fc = obj.fc;
+        %     c = physconst('LightSpeed');
+        %     N_ant_ris = 64;  % RIS elements
             
-            % Calculate frequency-dependent SNRs
-            snr_direct = squeeze(mean(abs(H_Los).^2, [1 2])) / obj.noise_var;  % [Ns×1]
-            snr_reflected = squeeze(mean(abs(H_NLoS).^2, [1 2])) / obj.noise_var;
+        %     % Calculate frequency-dependent SNRs
+        %     snr_direct = squeeze(mean(abs(H_Los).^2, [1 2])) / obj.noise_var;  % [Ns×1]
+        %     snr_reflected = squeeze(mean(abs(H_NLoS).^2, [1 2])) / obj.noise_var;
             
-            % Average SNR across subcarriers
-            avg_snr_direct = mean(snr_direct);
-            avg_snr_reflected = mean(snr_reflected);
+        %     % Average SNR across subcarriers
+        %     avg_snr_direct = mean(snr_direct);
+        %     avg_snr_reflected = mean(snr_reflected);
             
-            % Calculate parameter variances (CRLB)
-            lambda = c/fc;
-            var_delay_direct = 1./(8*pi^2 * B^2 * snr_direct);
-            var_delay_reflected = 1./(8*pi^2 * B^2 * snr_reflected);
+        %     % Calculate parameter variances (CRLB)
+        %     lambda = c/fc;
+        %     var_delay_direct = 1./(8*pi^2 * B^2 * snr_direct);
+        %     var_delay_reflected = 1./(8*pi^2 * B^2 * snr_reflected);
             
-            var_angle_direct = lambda^2./(8*pi^2 * snr_direct * (lambda/2)^2);
-            var_angle_reflected = lambda^2./(8*pi^2 * snr_reflected * ((lambda/2)^2 * N_ant_ris));
+        %     var_angle_direct = lambda^2./(8*pi^2 * snr_direct * (lambda/2)^2);
+        %     var_angle_reflected = lambda^2./(8*pi^2 * snr_reflected * ((lambda/2)^2 * N_ant_ris));
             
-            % Frequency-average variances
-            sigma_sq = [
-                mean(var_delay_direct);     % BS-target delay
-                mean(var_delay_reflected);  % RIS-target delay
-                mean(var_angle_reflected);  % RIS angle 1
-                mean(var_angle_reflected);  % RIS angle 2
-                mean(var_angle_reflected);  % RIS angle 3
-                mean(var_angle_direct);     % BS elevation 1
-                mean(var_angle_direct)      % BS elevation 2
-            ];
+        %     % Frequency-average variances
+        %     sigma_sq = [
+        %         mean(var_delay_direct);     % BS-target delay
+        %         mean(var_delay_reflected);  % RIS-target delay
+        %         mean(var_angle_reflected);  % RIS angle 1
+        %         mean(var_angle_reflected);  % RIS angle 2
+        %         mean(var_angle_reflected);  % RIS angle 3
+        %         mean(var_angle_direct);     % BS elevation 1
+        %         mean(var_angle_direct)      % BS elevation 2
+        %     ];
             
-            J_zao = diag(1./sigma_sq);
-        end
+        %     J_zao = diag(1./sigma_sq);
+        % end
            
         
         function [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, N, B, gamma_l, gamma_nl, h_l, h_nl)
