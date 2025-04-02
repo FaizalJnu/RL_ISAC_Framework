@@ -1,3 +1,4 @@
+import math
 import numpy as np
 from dataclasses import dataclass
 from typing import Tuple, NamedTuple, Optional
@@ -27,18 +28,27 @@ class WirelessChannelSimulation:
         self.Ny = 8  # Number of RIS elements in y-direction
         self.Nr = self.Nx * self.Ny  # Total number of RIS elements
         self.Mb = 64  # Number of subcarriers
-        self.N = 2048  # FFT size
+        self.Ns = 10  # FFT size
         self.B = 20e6  # Bandwidth (20 MHz)
         self.fc = 28e9  # Carrier frequency
         self.c = 3e8  # Speed of light
         self.lambda_ = self.c / self.fc
         self.d = 0.5 * self.lambda_  # Antenna spacing
+        self.SNR = 0
+        self.rate = 0
+        self.noise_Var = 0
+
         
         # Environment Parameters
         self.x_size = 1000  # Environment size in meters
         self.y_size = 1000
         self.z_size = 100
         
+        self.alpha_nl = 3.2
+        self.alpha_nl = 2.2
+        self.rho_l = 3
+        self.rho_nl = 4
+
         # Channel Parameters
         self.K_dB = 4  # Rician K-factor in dB
         self.K = 10**(self.K_dB/10)
@@ -46,16 +56,98 @@ class WirelessChannelSimulation:
         self.mu = np.sqrt(self.K/(self.K+1))
         
         # Initialize positions
-        self.vehicle_pos = np.array([500, 500, 0])
+        self.starting_pos = np.array([500, 500, 0])
         self.goal_pos = np.array([1000, 500, 0])
         self.bs_loc = np.array([900, 100, 20])
         self.ris_loc = np.array([200, 300, 40])
         
+        self.visualization_axis
+        self.trajectory = []
+        self.speed = 10
+        self.radius = 250
+        self.center = np.array([250,500,0])
+        self.car_los = self.center + np.array([self.radius, 0, 0])
+        self.angle = 0
+        self.car_orientation = math.pi / 2
+        self.angular_speed = 0.08
+
         # Initialize array positions
         self.bs_array_positions = self._init_bs_array()
         self.vehicle_array_positions = np.zeros((self.Nt, 3))
         self.ris_array_positions = self._init_ris_array()
 
+    def calculate_vals(self):
+        real_part = np.random.randn()
+        imag_part = np.random.randn()
+        self.hl = (self.sigma*complex(real_part,imag_part)) + self.mu
+        real_part = np.random.randn()
+        imag_part = np.random.randn()
+        self.hl = (self.sigma*complex(real_part,imag_part)) + self.mu
+
+        H_Los,H_Los_3d = generate_H_Los(self, self.H_bt, self.Nt, self.Nb)
+        H_NLos,H_NLos_3d = generate_H_NLos(self, self.H_rt, self.H_br, self.Nt,
+                                            self.Nr, self.Nb)
+        self.H_combined = H_Los + H_NLos
+
+        Wx, W = computeWx(self)
+        self.Pb = getpower(self)
+
+        gamma_c_per_subcarrier = np.zeros(self.Ns)
+        # import numpy as np
+        for n in range(self.Ns):
+            H_combined_n = HLos_3d[:,:,n] + HNLos_3d[:,:,n]
+            gamma_c_per_subcarrier[n] = self.Pb * np.linalg.norm(H_combined_n @ W, 'fro')**2 / self.sigma_c**2
+
+        self.gamma_c = self.Ns / np.sum(1 / gamma_c_per_subcarrier)
+
+        self.SNR = 10*np.log10(self.gamma_c)
+        self.rate = getrate(self)
+        self.R_min = self.B*60
+        self.noise_var = self.pb / self.gamma_c
+    
+    def getpower(self):
+        wx = computeWx(self)
+        return np.mean(np.sum(np.abs(wx)**2,axis=0))
+    
+    def getrate(self):
+        return self.B*np.log2(1+self.gamma_c)
+
+    def generate_H_Los(self, H_bt, Nt, Nb):
+        gamma_l = np.sqrt(Nb*Nt)/np.sqrt(self.rho_l)
+
+        _ , _ , _ , _ , _ , _ , delays , _ = computeGeometricParams(self)
+        tau_l = delays.line_of_sight
+
+        H_Los_3d = np.zeros(Nt, Nb, self.Ns)
+        for n in range(self.Ns):
+            # Calculate phase shift for nth subcarrier
+            phase = np.exp(1j * 2 * np.pi * self.B * (n - 1) * tau_l / self.Ns)
+            
+            # H_bt is now a 3D matrix, so we use H_bt[:,:,n-1]
+            H_Los_3d[:,:,n-1] = gamma_l * self.h_l * H_bt[:,:,n-1] * phase
+        
+        H_Los = np.mean(H_Los_3d, axis=2)
+
+        return H_Los, H_Los_3d
+    
+    def generate_H_NLos(self, H_rt, H_br, Nt, Nr, Nb):
+        gamma_nl = np.sqrt(Nb*Nr)/np.sqrt(self.rho_nl)
+
+        _ , _ , _ , _ , _ , _ , delays , _ = computeGeometricParams(self)
+        tau_nl = delays.non_line_of_sight
+
+        H_Los_3d = np.zeros(Nt, Nb, self.Ns)
+        for n in range(self.Ns):
+            # Calculate phase shift for nth subcarrier
+            phase = np.exp(1j * 2 * np.pi * self.B * (n - 1) * tau_l / self.Ns)
+            
+            # H_bt is now a 3D matrix, so we use H_bt[:,:,n-1]
+            H_Los_3d[:,:,n-1] = gamma_l * self.h_l * H_bt[:,:,n-1] * phase
+        
+        H_Los = np.mean(H_Los_3d, axis=2)
+
+        return H_Los, H_Los_3d
+        
     def _init_bs_array(self) -> np.ndarray:
         """Initialize BS array positions."""
         positions = np.zeros((self.Nb, 3))
@@ -136,16 +228,6 @@ class WirelessChannelSimulation:
             self.vehicle_array_positions[i] = self.vehicle_pos + np.array([0, i * self.d, 0])
             
     def simulate_downlink_transmission(self, delays: Delays, W: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray, float]:
-        """
-        Simulate downlink transmission with both LoS and NLoS paths.
-        
-        Args:
-            delays: Delays for LoS and NLoS paths
-            W: Optional beamforming matrix
-            
-        Returns:
-            Tuple of H_NLoS, H_LoS channels and gamma_c parameter
-        """
         # Generate transmit data for each subcarrier
         x = (np.random.randn(self.Mb) + 1j * np.random.randn(self.Mb)) / np.sqrt(2)
         

@@ -1,5 +1,5 @@
 % import java.math.*
-classdef RISISAC_V2X_Sim < handle
+classdef matlab_sim < handle
     properties
         % System parameters
         fc = 28e9                 % Carrier frequency (28 GHz)
@@ -122,7 +122,6 @@ classdef RISISAC_V2X_Sim < handle
         function obj = RISISAC_V2X_Sim()
             % Initialize channels
             obj.initializeChannels();
-            obj.initializephi();
             obj.calculated_values();
             obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
             obj.initializeVisualization();
