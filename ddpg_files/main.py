@@ -8,7 +8,7 @@ import gym
 
 from normalized_env import NormalizedEnv
 from evaluator import Evaluator
-from ddpg import DDPG
+from ddpg_files.ddpg import DDPG
 from util import *
 
 from MatlabEnv import MatlabEnv

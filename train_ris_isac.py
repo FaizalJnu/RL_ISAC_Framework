@@ -120,8 +120,9 @@ class RISISACTrainer:
         plt.ylabel('Learning Rate')
         plt.yscale('log')
         
+        plt_folder = 'plots'
         plt.tight_layout()
-        plt.savefig('training_progress.png')
+        plt.savefig(os.path.join(plt_folder,'training_progress.png'))
         plt.close()
     
     def train(self, num_episodes, max_steps, target_peb):
