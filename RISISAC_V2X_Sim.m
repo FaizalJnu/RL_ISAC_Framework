@@ -141,11 +141,9 @@ classdef RISISAC_V2X_Sim < handle
             obj.h_l = (sigma * complex(randn(1,1), randn(1,1))) + mu;
 
             obj.h_nl = (sigma * complex(randn(1,1), randn(1,1))) + mu;
-            
-            [HLos,HLos_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
-            [HNLos,HNLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
-            obj.H_combined = HLos + HNLos;
 
+            HLos_3d = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
+            HNLos_3d = generate_H_NLoS(obj,)
             [Wx,W] = computeWx(obj);
             obj.Pb = getpower(obj);
             gamma_c_per_subcarrier = zeros(1, obj.Ns);
@@ -160,6 +158,13 @@ classdef RISISAC_V2X_Sim < handle
             obj.R_min = obj.B*60;
 
             obj.noise_var = obj.Pb / obj.gamma_c;
+        end
+
+        function H_combined = compute_Heff(obj, HLos, HNLos)
+            [HLos,HLos_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
+            [HNLos,HNLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
+            H_combined = HLos + HNLos;
+            obj.H_combined = H_combined;
         end
 
         function Pb = getpower(obj)
