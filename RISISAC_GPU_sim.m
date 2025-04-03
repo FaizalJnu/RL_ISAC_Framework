@@ -1,5 +1,5 @@
 % import java.math.*
-classdef RISISAC_V2X_Sim < handle
+classdef RISISAC_GPU_sim < handle
     properties
         % System parameters
         fc = 28e9                 % Carrier frequency (28 GHz)

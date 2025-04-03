@@ -10,7 +10,8 @@ class RISISACTrainer:
     def __init__(self):
         # Start MATLAB engine
         print("Starting MATLAB engine...")
-        self.eng = matlab.engine.start_matlab() 
+        self.eng = matlab.engine.start_matlab()
+        self.eng.eval("parpool('local', 10);", nargout=0) 
 
         # Initialize MATLAB simulation
         self.sim = self.eng.RISISAC_V2X_Sim()
@@ -307,6 +308,7 @@ class RISISACTrainer:
     
     def close(self):
         """Clean up MATLAB engine"""
+        self.eng.eval("delete(gcp('nocreate'));", nargout=0)
         self.eng.quit()
 
 if __name__ == "__main__":
@@ -314,89 +316,85 @@ if __name__ == "__main__":
     trainer = RISISACTrainer()
     print(type(trainer.sim))
     
-    try:
-        # Train the agent
-        print("Starting training process...")
-        # rewards = trainer.train(num_episodes=100000, max_steps=10000, target_peb=12)
-        metrics = trainer.train(num_episodes=300, max_steps=10000, target_peb=0)
+    
+    # Train the agent
+    print("Starting training process...")
+    # rewards = trainer.train(num_episodes=100000, max_steps=10000, target_peb=12)
+    metrics = trainer.train(num_episodes=300, max_steps=10000, target_peb=0)
 
-        # Extract episode rewards
-        rewards = metrics['episode_rewards']
-        episodes = list(range(len(rewards)))
+    # Extract episode rewards
+    rewards = metrics['episode_rewards']
+    episodes = list(range(len(rewards)))
 
-        # Test the trained agent
-        print("\nTesting trained agent...")
-        trainer.test(num_episodes=10)
+    # Test the trained agent
+    print("\nTesting trained agent...")
+    trainer.test(num_episodes=10)
 
-        # plt.figure(figsize=(15, 10))
+    # plt.figure(figsize=(15, 10))
 
-        # # Plot PEB metrics
-        # plt.subplot(2, 2, 1)
-        # plt.plot(trainer.metrics['initial_peb_values'], label='Initial PEB')
-        # plt.plot(trainer.metrics['last_peb_values'], label='Last PEB')
-        # plt.title('Initial vs Final PEB per Episode')
-        # plt.xlabel('Episode')
-        # plt.ylabel('PEB')
-        # plt.legend()
+    # # Plot PEB metrics
+    # plt.subplot(2, 2, 1)
+    # plt.plot(trainer.metrics['initial_peb_values'], label='Initial PEB')
+    # plt.plot(trainer.metrics['last_peb_values'], label='Last PEB')
+    # plt.title('Initial vs Final PEB per Episode')
+    # plt.xlabel('Episode')
+    # plt.ylabel('PEB')
+    # plt.legend()
 
-        # plt.subplot(2, 2, 2)
-        # plt.plot(trainer.metrics['min_peb_values'], label='Min PEB')
-        # plt.plot(trainer.metrics['avg_peb_values'], label='Avg PEB')
-        # plt.plot(trainer.metrics['max_peb_values'], label='Max PEB')
-        # plt.title('PEB Statistics per Episode')
-        # plt.xlabel('Episode')
-        # plt.ylabel('PEB')
-        # plt.legend()
-        
-        plt_folder = 'plots'
-        if not os.path.exists(plt_folder):
-            os.makedirs(plt_folder)
-        
-        # Plot training rewards
-        plt.figure(figsize=(10, 5))
-        plt.plot(episodes, rewards)
-        plt.title('Training Rewards')
-        plt.xlabel('Episode')
-        plt.ylabel('Reward')
-        plt.savefig(os.path.join(plt_folder,'training_rewards.png'))
-        # plt.show()
-        
-        plt.figure(figsize=(10, 5))
-        plt.plot(episodes, metrics['last_peb_values'])
-        plt.title('Performance Error Bound (PEB) over Episodes')
-        plt.xlabel('Episode')
-        plt.ylabel('PEB Value')
-        plt.grid(True)
-        plt.savefig(os.path.join(plt_folder,'peb_values.png'))
-        # plt.show()
-        
-        plt.figure(figsize=(10,5))
-        plt.plot(episodes, metrics['avg_rate'])
-        plt.title('Average rate per epsiode')
-        plt.xlabel('Episode')
-        plt.ylabel('Rate(Bits/s/hz)')
-        plt.grid(True)
-        plt.savefig(os.path.join(plt_folder,'Rate_per_episode'))
-        # plt.show()
+    # plt.subplot(2, 2, 2)
+    # plt.plot(trainer.metrics['min_peb_values'], label='Min PEB')
+    # plt.plot(trainer.metrics['avg_peb_values'], label='Avg PEB')
+    # plt.plot(trainer.metrics['max_peb_values'], label='Max PEB')
+    # plt.title('PEB Statistics per Episode')
+    # plt.xlabel('Episode')
+    # plt.ylabel('PEB')
+    # plt.legend()
+    
+    plt_folder = 'plots'
+    if not os.path.exists(plt_folder):
+        os.makedirs(plt_folder)
+    
+    # Plot training rewards
+    plt.figure(figsize=(10, 5))
+    plt.plot(episodes, rewards)
+    plt.title('Training Rewards')
+    plt.xlabel('Episode')
+    plt.ylabel('Reward')
+    plt.savefig(os.path.join(plt_folder,'training_rewards.png'))
+    # plt.show()
+    
+    plt.figure(figsize=(10, 5))
+    plt.plot(episodes, metrics['last_peb_values'])
+    plt.title('Performance Error Bound (PEB) over Episodes')
+    plt.xlabel('Episode')
+    plt.ylabel('PEB Value')
+    plt.grid(True)
+    plt.savefig(os.path.join(plt_folder,'peb_values.png'))
+    # plt.show()
+    
+    plt.figure(figsize=(10,5))
+    plt.plot(episodes, metrics['avg_rate'])
+    plt.title('Average rate per epsiode')
+    plt.xlabel('Episode')
+    plt.ylabel('Rate(Bits/s/hz)')
+    plt.grid(True)
+    plt.savefig(os.path.join(plt_folder,'Rate_per_episode'))
+    # plt.show()
 
-        plt.figure(figsize=(10,5))
-        plt.plot(episodes, metrics['avg_power'])
-        plt.title('Average power per episode')
-        plt.xlabel('Episode')
-        plt.ylabel('Power(db)')
-        plt.grid(True)
-        plt.savefig(os.path.join(plt_folder,'power_per_episode'))
+    plt.figure(figsize=(10,5))
+    plt.plot(episodes, metrics['avg_power'])
+    plt.title('Average power per episode')
+    plt.xlabel('Episode')
+    plt.ylabel('Power(db)')
+    plt.grid(True)
+    plt.savefig(os.path.join(plt_folder,'power_per_episode'))
 
-        # plt.figure(figsize=(10,5))
-        # plt.plot(episodes, metrics['best_peb'])
-        # plt.title('Best PEB per episode')
-        # plt.xlabel('Episode')
-        # plt.ylabel('PEB')
-        # plt.grid(True)
-        # plt.savefig(os.path.join(plt_folder,'best_peb_per_episode'))
-        # plt.show()
-
-
-    finally:
-        # Clean up
-        trainer.close()
+    # plt.figure(figsize=(10,5))
+    # plt.plot(episodes, metrics['best_peb'])
+    # plt.title('Best PEB per episode')
+    # plt.xlabel('Episode')
+    # plt.ylabel('PEB')
+    # plt.grid(True)
+    # plt.savefig(os.path.join(plt_folder,'best_peb_per_episode'))
+    # plt.show()
+    trainer.close()
