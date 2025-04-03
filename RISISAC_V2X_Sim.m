@@ -806,20 +806,22 @@ classdef RISISAC_V2X_Sim < handle
             [J, ~, ~] = computeFisherInformationMatrix(obj,Wx);
             CRLB = inv(J);
             obj.peb = sqrt(trace(CRLB));
-            rate_constraint_satisfied = (obj.rate >= obj.R_min);
+            obj.peb = real(obj.peb);
+            % rate_constraint_satisfied = (obj.rate >= obj.R_min);
 
-            if ~rate_constraint_satisfied
-                penalty_factor = 1 + (obj.R_min - obj.rate)/obj.R_min;
-                obj.peb = obj.peb * penalty_factor;
-            end
-            obj.peb = sqrt((real(obj.peb))^2 + (imag(obj.peb))^2)*100;
-            obj.peb = 1+11/(1+exp(-(obj.peb-6.5)));
+            % if ~rate_constraint_satisfied
+            %     penalty_factor = 1 + (obj.R_min - obj.rate)/obj.R_min;
+            %     obj.peb = obj.peb * penalty_factor;
+            % end
+            % obj.peb = sqrt((real(obj.peb))^2 + (imag(obj.peb))^2)*100;
+            % obj.peb = 1+11/(1+exp(-(obj.peb-6.5)));
             % if(obj.peb < obj.minpeb)
             %     obj.minpeb = obj.peb;
             % else
             %     obj.peb = obj.minpeb;
             % end
             peb = obj.peb;
+            disp(peb);
         end
         
         function [T] = computeTransformationMatrix(obj)
@@ -847,6 +849,15 @@ classdef RISISAC_V2X_Sim < handle
             T(2,5) = (zr*(yr-yt)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
             T(2,6) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
             T(2,7) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
+
+            % disp ("this is L2")
+            % disp(L2)
+            % disp("this is L3")
+            % disp(L3)
+            % disp("this is Lproj2")
+            % disp(L_proj2)
+            % disp(T)
+
         end
         
         % ! Don't remove this
@@ -1107,7 +1118,9 @@ classdef RISISAC_V2X_Sim < handle
                     end
                 end                
             end
-            obj.Jzao = J_zao;
+            % obj.Jzao = J_zao;
+            % disp("this is Jzao matrix: ");
+            % disp(J_zao);
         end                         
         % ! -------------------- PEB COMPUTATION PART ENDS HERE --------------------        
 
