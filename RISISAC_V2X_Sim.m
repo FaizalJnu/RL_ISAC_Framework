@@ -20,6 +20,8 @@ classdef RISISAC_V2X_Sim < handle
         h_nl = 0;
         gamma_c = 0;
         SNR = 0;
+        W
+        Wx
         noise_var = 0;
         cc = 0;
         speed = 10
@@ -123,28 +125,44 @@ classdef RISISAC_V2X_Sim < handle
             % Initialize channels
             obj.initializeChannels();
             obj.initializephi();
-            obj.calculated_values();
+            obj.calculate_pathloss();
             obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
             obj.initializeVisualization();
             % obj.destination = [999, 999, 0];
+            obj.H_combined = obj.compute_Heff();
+            [~,~] = computeWx(obj);
+            obj.Pb = obj.getpower();
+            obj.gamma_c = obj.computeSNR();
+            obj.rate = obj.getrate();
+            obj.peb = obj.calculatePerformanceMetrics(obj.H_combined);
         end
 
         function nb = get_Nb(obj)
             nb = obj.Nb;
         end
 
-        function calculated_values(obj)
+        function calculate_pathloss(obj)
             K_dB = 4; % Rician K-factor in dB
             K = 10^(K_dB/10);
             sigma = sqrt(1/(2*(K+1)));
             mu = sqrt(K/(K+1));
             obj.h_l = (sigma * complex(randn(1,1), randn(1,1))) + mu;
-
             obj.h_nl = (sigma * complex(randn(1,1), randn(1,1))) + mu;
+        end
 
-            HLos_3d = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
-            HNLos_3d = generate_H_NLoS(obj,)
-            [Wx,W] = computeWx(obj);
+        function H_combined = compute_Heff(obj)
+            [HLos,HLos_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
+            [HNLos,HNLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
+            H_combined = HLos + HNLos;
+            obj.H_combined = H_combined;
+            obj.W = computeWx(obj);
+            obj.Pb = getpower(obj);
+        end
+
+        function gamma_c = computeSNR(obj)
+            [~,HLos_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
+            [~,HNLos_3d] = generate_H_NLoS(obj,obj.H_rt, obj.H_br, obj.Nt, obj.Nr);
+            [~,W] = computeWx(obj);
             obj.Pb = getpower(obj);
             gamma_c_per_subcarrier = zeros(1, obj.Ns);
             for n = 1:obj.Ns
@@ -153,32 +171,26 @@ classdef RISISAC_V2X_Sim < handle
             end
             obj.gamma_c = obj.Ns / sum(1 ./ gamma_c_per_subcarrier);  
             obj.SNR = 10 * log10(obj.gamma_c);
-            obj.rate = getrate(obj);
-            obj.cc = obj.B * log2(1+obj.SNR);
-            obj.R_min = obj.B*60;
-
-            obj.noise_var = obj.Pb / obj.gamma_c;
+            gamma_c = obj.gamma_c;
         end
 
-        function H_combined = compute_Heff(obj, HLos, HNLos)
-            [HLos,HLos_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
-            [HNLos,HNLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
-            H_combined = HLos + HNLos;
-            obj.H_combined = H_combined;
-        end
 
         function Pb = getpower(obj)
-            Wx = computeWx(obj); 
+            [Wx,~] = computeWx(obj); 
             Pb = mean(sum(abs(Wx).^2, 1));
+            obj.Pb = Pb;
         end
 
         function rate = getrate(obj)
             rate = obj.B*log2(1+obj.gamma_c);
+            obj.rate = rate;
         end
 
         % ! -------------------- CHANNEL INITIALIZATION PART STARTS HERE --------------------        
         function initializeChannels(obj)
-            [obj.H_bt, obj.H_br, obj.H_rt] = generate_channels(obj, obj.Nt, obj.Nr, obj.Nb);            
+            [obj.H_bt, obj.H_br, obj.H_rt] = generate_channels(obj, obj.Nt, obj.Nr, obj.Nb);   
+            obj.H_combined = compute_Heff(obj);
+            
         end
 
         function initializephi(obj)
@@ -434,13 +446,16 @@ classdef RISISAC_V2X_Sim < handle
             % Update RIS phases based on action
             ris_phases = action(1:obj.Nr);
             obj.phi = diag(exp(1j * 2 * pi * ris_phases));
-
-            obj.calculated_values()
-            
-            % Calculate performance metrics
-            peb = obj.calculatePerformanceMetrics();
-            rate = getrate(obj);
+            obj.H_combined = compute_Heff(obj);
+            [Wx,~] = computeWx(obj);
             power = getpower(obj);
+            obj.Pb = power;
+            obj.gamma_c = computeSNR(obj);
+            rate = getrate(obj);
+            obj.rate = rate;
+            peb = obj.calculatePerformanceMetrics(Wx);
+            obj.peb = peb;
+            % Calculate performance metrics
             reward = obj.computeReward(peb);
             reward = abs(reward); % Ensure reward is a real-valued scalar
             
@@ -665,10 +680,11 @@ classdef RISISAC_V2X_Sim < handle
             constraints_satisfied = (obj.rate >= obj.R_min);
 
             base_reward = 1 / peb;  % Keeps reward bounded [0,1]
+            n = rand(1);
             
             if ~constraints_satisfied
                 % reward = base_reward * (0.5 + 0.5 * (obj.rate / obj.R_min)); 
-                reward = base_reward * 0.5;
+                reward = base_reward * n;
             else
                 reward = base_reward;
             end
@@ -678,8 +694,19 @@ classdef RISISAC_V2X_Sim < handle
         function state = reset(obj)
             % Reset simulation state
             obj.initializeChannels();
-            obj.calculated_values();
-            obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
+            obj.initializephi();
+            obj.calculate_pathloss();
+            % obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
+            % obj.initializeVisualization();
+            % obj.destination = [999, 999, 0];
+            obj.H_combined = obj.compute_Heff();
+            [~,~] = computeWx(obj);
+            obj.Pb = obj.getpower();
+            obj.gamma_c = obj.computeSNR();
+            obj.rate = obj.getrate();
+            obj.peb = obj.calculatePerformanceMetrics(obj.H_combined);
+            % obj.calculated_values();
+            % obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
 
             obj.car_loc = obj.starting_pos;
             obj.target_loc = obj.car_loc;
@@ -779,8 +806,8 @@ classdef RISISAC_V2X_Sim < handle
         end
         
 
-        function [peb] = calculatePerformanceMetrics(obj)
-            [J, ~, ~] = computeFisherInformationMatrix(obj);
+        function [peb] = calculatePerformanceMetrics(obj, Wx)
+            [J, ~, ~] = computeFisherInformationMatrix(obj,Wx);
             CRLB = inv(J);
             obj.peb = sqrt(trace(CRLB));
             rate_constraint_satisfied = (obj.rate >= obj.R_min);
@@ -828,11 +855,16 @@ classdef RISISAC_V2X_Sim < handle
         
         % ! Don't remove this
         function [Wx, W] = computeWx(obj)
-            N = obj.Ns;  
-            W = rand(obj.Nb, obj.Mb) + 1j*randn(obj.Nb, obj.Mb);
+            N = obj.Ns;
+            if obj.stepCount > 1
+                W_mrt = compute_Heff(obj);
+                W_mrt = W_mrt / norm(W_mrt, 'fro');
+                W = repmat(W_mrt, [1,obj.Mb]);
+            else
+                W = rand(obj.Nb, obj.Mb) + 1j*randn(obj.Nb, obj.Mb);
+            end  
             W = W ./ vecnorm(W); 
             Wx = zeros(obj.Nb, N);
-            
             % Generate a different X for each subcarrier
             for n = 1:N
                 X_n = (randn(obj.Mb, 1) + 1j*randn(obj.Mb, 1)) / sqrt(2);
@@ -883,10 +915,9 @@ classdef RISISAC_V2X_Sim < handle
         %     end
         % end        
         
-        function [J, J_zao, T] = computeFisherInformationMatrix(obj)
+        function [J, J_zao, T] = computeFisherInformationMatrix(obj,Wx)
             % sigma_s = sqrt(obj.Pb/obj.gamma_c);  % Noise variance (placeholder)
             [T] = computeTransformationMatrix(obj);
-            [Wx,~] = computeWx(obj);
             gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
             gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
             
