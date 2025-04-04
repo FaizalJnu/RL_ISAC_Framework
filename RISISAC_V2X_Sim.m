@@ -14,7 +14,7 @@ classdef RISISAC_V2X_Sim < handle
         rate = 0
         c = 3e8;
         lambda = 3e8/28e9;
-        sigma_c = sqrt(6.31 * 10^-13);
+        sigma_c_sq = 1.38e-23 * 290 * 20e6; 
 
         h_l = 0;
         h_nl = 0;
@@ -164,16 +164,15 @@ classdef RISISAC_V2X_Sim < handle
             gamma_c_per_subcarrier = zeros(1, obj.Ns);
             for n = 1:obj.Ns
                 H_combined_n = HLos_3d(:,:,n) + HNLos_3d(:,:,n);
-                gamma_c_per_subcarrier(n) = obj.Pb * norm(H_combined_n * obj.W, 'fro')^2 / obj.sigma_c^2;
+                gamma_c_per_subcarrier(n) = obj.Pb * norm(H_combined_n * obj.W, 'fro')^2 / obj.sigma_c_sq;
             end
             obj.gamma_c = obj.Ns / sum(1 ./ gamma_c_per_subcarrier);  
             obj.SNR = 10 * log10(obj.gamma_c);
             gamma_c = obj.gamma_c;
         end
 
-
         function Pb = getpower(obj) 
-            Pb = mean(sum(abs(obj.Wx).^2, 1));
+            Pb = trace(obj.Wx * obj.Wx') / obj.Ns;
             obj.Pb = Pb;
         end
 
@@ -780,7 +779,13 @@ classdef RISISAC_V2X_Sim < handle
             L_proj1 = sqrt((xb - xr)^2 + (yb - yr)^2);
             L_proj2 = sqrt((xr - xt)^2 + (yr - yt)^2);
             L_proj3 = sqrt((xb - xt)^2 + (yb - yt)^2);
-        
+
+            L_r = sqrt((xb - xr)^2 + (yb - yr)^2 + (zb - zr)^2) + sqrt((xr - xt)^2 + (yr - yt)^2 + zr^2);
+            L_t = sqrt((xb - xr)^2 + (yb - yr)^2 + (zb - zr)^2) + sqrt((xr - xt)^2 + (yr - yt)^2 + (zr - zt)^2);
+
+            delays.reflected = L_r / obj.c;
+            delays.transmitted = L_t / obj.c;
+
             % Calculate delays
             delays.line_of_sight = L3 / obj.c;
             delays.non_line_of_sight = (L1 + L2) / obj.c;
@@ -799,6 +804,7 @@ classdef RISISAC_V2X_Sim < handle
             angles.bs_to_star_ris = angles.bs_to_ris;  % Same as reflection
             angles.star_ris_to_target.aoa = asin((zr - zt) / L2_t);
             angles.star_ris_to_target.elevation_angle = acos((zr - zt) / L2_t);
+            angles.star_ris_to_target.transmission_elevation = acos((zr - zt) / L2_t);
         end
         
 
@@ -821,7 +827,7 @@ classdef RISISAC_V2X_Sim < handle
             %     obj.peb = obj.minpeb;
             % end
             peb = obj.peb;
-            disp(peb);
+            % disp(peb);
         end
         
         function [T] = computeTransformationMatrix(obj)
@@ -867,19 +873,19 @@ classdef RISISAC_V2X_Sim < handle
                 W_mrt = compute_Heff(obj);
                 W_mrt = W_mrt / norm(W_mrt, 'fro');
                 W_mrt_reshaped = W_mrt(:,1);
-                W = repmat(W_mrt_reshaped, [1, obj.Mb]);
+                W = repmat(W_mrt_reshaped, [1, obj.Ns]);
                 % disp("This is the size after first step")
                 % disp(size(W));
             else
-                W = rand(obj.Nb, obj.Mb) + 1j*randn(obj.Nb, obj.Mb);
+                W = rand(obj.Nb, obj.Ns) + 1j*randn(obj.Nb, obj.Ns);
                 % disp("This is the size at first step")
                 % disp(size(W));
             end  
             W = W ./ vecnorm(W); 
-            Wx = zeros(obj.Nb, N);
+            Wx = zeros(obj.Nb, obj.Ns);
             % Generate a different X for each subcarrier
             for n = 1:N
-                X_n = (randn(obj.Mb, 1) + 1j*randn(obj.Mb, 1)) / sqrt(2);
+                X_n = (randn(obj.Ns, 1) + 1j*randn(obj.Ns, 1)) / sqrt(2);
                 Wx(:,n) = W * X_n;
             end
         end
@@ -1111,9 +1117,9 @@ classdef RISISAC_V2X_Sim < handle
                         % Compute the FIM entry based on dimensions
                         if rows_i == rows_j && cols_i == cols_j
                             % If dimensions match, use dot product
-                            J_zao(i,j) = J_zao(i,j) + real(sum(sum(conj(d_mu_array{i}) .* d_mu_array{j})));
+                            J_zao(i,j) = J_zao(i,j) +  (2*obj.Pb/obj.sigma_c_sq)*real(sum(sum(conj(d_mu_array{i}) .* d_mu_array{j})));
                         else
-                            J_zao(i,j) = J_zao(i,j) + real(sum(sum(d_mu_array{i} * d_mu_array{j}')));
+                            J_zao(i,j) = J_zao(i,j) +  (2*obj.Pb/obj.sigma_c_sq)*real(sum(sum(d_mu_array{i} * d_mu_array{j}')));
                         end
                     end
                 end                

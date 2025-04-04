@@ -98,7 +98,7 @@ class RISISACTrainer:
         
         # Plot PEB values
         plt.subplot(2, 2, 2)
-        plt.plot(self.metrics['peb_values'])
+        plt.plot(self.metrics['avg_peb_values'], label='Avg PEB')
         plt.title('Position Error Bound (PEB)')
         plt.xlabel('Episode')
         plt.ylabel('PEB')
