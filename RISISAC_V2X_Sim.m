@@ -851,7 +851,7 @@ classdef RISISAC_V2X_Sim < handle
             T(2,1) = (yt-yb) / (obj.c*L3);
             T(2,2) = (yt-yr) / (obj.c*L2);
             T(2,3) = (zr*(yt-yr)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
-            T(2,4) = ((L_proj2^2) * (yr-yt)*(xr-xt)) / ((L2^3)*sqrt(1-((yr-yt)^2)/(L2)^2));
+            T(2,4) = ((L_proj2^2) + (yr-yt)*(xr-xt)) / ((L2^3)*sqrt(1-((yr-yt)^2)/(L2)^2));
             T(2,5) = (zr*(yr-yt)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
             T(2,6) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
             T(2,7) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
@@ -1011,123 +1011,165 @@ classdef RISISAC_V2X_Sim < handle
             end
         end 
 
-        function [J_zao] = calculateJacobianMatrix(obj, Pb, N, Wx, A1, A2, A3, A4)
-            % TODO: Initialize 7x7 Jacobian matrix
+        function [J_zao] = calculate_Jzao(obj, Pb, N, Wx, H_Los_3d, H_NLos_3d)
             J_zao = zeros(7, 7);
-            [~, ~, ~, ~, ~, ~, ~, angles] = computeGeometricParameters(obj);
+            [~, ~, ~, ~, ~, ~, delays, angles] = computeGeometricParameters(obj);
             psi_rt = angles.ris_to_target.aoa;
             psi_bt = angles.bs_to_target_transmit;
             psi_tb = angles.bs_to_target_receive;
-            psi_br = angles.bs_to_ris.azimuth;
             phi_rt_a = angles.ris_to_target.azimuth;
             phi_rt_e = angles.ris_to_target.elevation_angle;
-            phi_br_a = angles.bs_to_ris.elevation_azimuth;
-            phi_br_e = angles.bs_to_ris.elevation_angle;
 
-            % Initialize a_rt with proper dimensions
-            % Initialize a_rt, a_bt, and a_tb with proper dimensions
-            a_rt = zeros(obj.Nt, obj.Ns);
-            a_bt = zeros(obj.Nb, obj.Ns);
-            a_tb = zeros(obj.Nt, obj.Ns);
+            tau_l = delays.line_of_sight;
+            tau_nl = delays.non_line_of_sight;
 
-            % Calculate for each subcarrier
-            for n = 1:obj.Ns
-                % For a_rt - we need a column vector, not a diagonal matrix
-                indices = (0:(obj.Nt-1))';  % Column vector of indices
-                a_rt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_rt) * indices;
-                
-                % For a_bt
-                indices_b = (0:(obj.Nb-1))';
-                a_bt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_bt) * indices_b;
-                
-                % For a_tb
-                a_tb(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_tb) * indices;
-            end
+            zao = {tau_l, tau_nl, psi_rt, phi_rt_a, phi_rt_e, psi_bt, psi_tb};
 
-            % Initialize arrays for a_rt_a and a_rt_e
-            a_rt_a = zeros(obj.Nr, obj.Ns);
-            a_rt_e = zeros(obj.Nr, obj.Ns);
+            scaling_factor = (2*obj.Pb) / obj.sigma_c_sq;
 
-            % Calculate a_rt_a and a_rt_e for each subcarrier
-            for n = 1:obj.Ns
-                a_rt_a(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * ((obj.Nx-1) * cos(phi_rt_a) * sin(phi_rt_e));
-                a_rt_e(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * (((obj.Nx-1) * sin(phi_rt_a) * cos(phi_rt_e)) - ((obj.Ny-1) * sin(phi_rt_e)));
-            end
-
-            % TODO: implement all the a vector
-            a_vec = compute_a_psi(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2);
-            a_psi_bt = a_vec;
-            a_vec = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2);
-            a_psi_tb = a_vec;
-            a_vec = compute_a_psi(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2);
-            a_psi_rt = a_vec;
-            a_vec = compute_a_psi(obj, obj.Nb, psi_br, obj.lambda, obj.lambda/2);
-            a_psi_br = a_vec;
-
-
-            % TODO: implement all the steering vector
-            a_phi_br = compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2);
-            a_phi_rt = compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, obj.lambda, obj.lambda/2);
-
-            for n = 1:N
-                % Calculate all partial derivatives
-                d_mu_array = cell(7, 1);
-                
-                % Extract the nth column from each steering vector matrix
-                a_psi_bt_n = a_psi_bt(:,n);
-                a_psi_tb_n = a_psi_tb(:,n);
-                a_psi_rt_n = a_psi_rt(:,n);
-                a_psi_br_n = a_psi_br(:,n);
-                a_phi_rt_n = a_phi_rt(:,n);
-                a_phi_br_n = a_phi_br(:,n);
-                
-                % Extract the nth element from amplitude matrices
-                A1_n = A1(n);
-                A2_n = A2(n);
-                A3_n = A3(n);
-                A4_n = A4(n);
-                
-                % Partial derivatives with respect to each parameter
-                % d_mu_d_tau_l
-                d_mu_array{1} = (A1_n * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
-                
-                % d_mu_d_tau_nl
-                d_mu_array{2} = (A2_n * a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
-                
-                d_mu_array{3} = A3_n * (a_rt(:,n) .* a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
-
-                % d_mu_d_phi_rt_a
-                d_mu_array{4} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_a(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
-                
-                % d_mu_d_phi_rt_e
-                d_mu_array{5} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_e(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
-                
-                % d_mu_d_psi_br
-                d_mu_array{6} = (A4_n * a_bt(:,n)' * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
-                
-                d_mu_array{7} = A4_n * (a_tb(:,n) .* a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
-
-                % Calculate Jacobian matrix elements
-                for i = 1:7
-                    for j = 1:7
-                        % Get the sizes of the current derivatives
-                        [rows_i, cols_i] = size(d_mu_array{i});
-                        [rows_j, cols_j] = size(d_mu_array{j});
+            for i = 1:7
+                for j = 1:7
+                    sum_term = 0;
+                    
+                    % Sum over all subcarriers
+                    for n = 1:10
+                        % Calculate mu for this subcarrier
+                        mu = (H_Los_3d(:,:,n) + H_NLos_3d(:,:,n)) * Wx(:,n);
                         
-                        % Compute the FIM entry based on dimensions
-                        if rows_i == rows_j && cols_i == cols_j
-                            % If dimensions match, use dot product
-                            J_zao(i,j) = J_zao(i,j) +  (2*obj.Pb/obj.sigma_c_sq)*real(sum(sum(conj(d_mu_array{i}) .* d_mu_array{j})));
-                        else
-                            J_zao(i,j) = J_zao(i,j) +  (2*obj.Pb/obj.sigma_c_sq)*real(sum(sum(d_mu_array{i} * d_mu_array{j}')));
-                        end
+                        % Calculate partial derivatives of mu with respect to parameters
+                        dmu_dzetai = calculate_derivative(mu, zao, i, n, H_Los_3d, H_NLos_3d, Wx);
+                        dmu_dzetaj = calculate_derivative(mu, zao, j, n, H_Los_3d, H_NLos_3d, Wx);
+                        
+                        % Calculate the Hermitian of dmu_dzetai
+                        dmu_dzetai_H = dmu_dzetai';
+                        
+                        % Calculate inner product and take real part
+                        inner_product = dmu_dzetai_H * dmu_dzetaj;
+                        sum_term = sum_term + real(inner_product);
                     end
-                end                
+                    
+                    % Multiply by scaling factor and store in J_zao matrix
+                    J_zao(i,j) = scaling_factor * sum_term;
+                end
             end
-            % obj.Jzao = J_zao;
-            % disp("this is Jzao matrix: ");
-            % disp(J_zao);
-        end                         
+        end
+        % function [J_zao] = calculateJacobianMatrix(obj, Pb, N, Wx, A1, A2, A3, A4)
+        %     % TODO: Initialize 7x7 Jacobian matrix
+        %     J_zao = zeros(7, 7);
+        %     [~, ~, ~, ~, ~, ~, ~, angles] = computeGeometricParameters(obj);
+        %     psi_rt = angles.ris_to_target.aoa;
+        %     psi_bt = angles.bs_to_target_transmit;
+        %     psi_tb = angles.bs_to_target_receive;
+        %     psi_br = angles.bs_to_ris.azimuth;
+        %     phi_rt_a = angles.ris_to_target.azimuth;
+        %     phi_rt_e = angles.ris_to_target.elevation_angle;
+        %     phi_br_a = angles.bs_to_ris.elevation_azimuth;
+        %     phi_br_e = angles.bs_to_ris.elevation_angle;
+
+        %     % Initialize a_rt with proper dimensions
+        %     % Initialize a_rt, a_bt, and a_tb with proper dimensions
+        %     a_rt = zeros(obj.Nt, obj.Ns);
+        %     a_bt = zeros(obj.Nb, obj.Ns);
+        %     a_tb = zeros(obj.Nt, obj.Ns);
+
+        %     % Calculate for each subcarrier
+        %     for n = 1:obj.Ns
+        %         % For a_rt - we need a column vector, not a diagonal matrix
+        %         indices = (0:(obj.Nt-1))';  % Column vector of indices
+        %         a_rt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_rt) * indices;
+                
+        %         % For a_bt
+        %         indices_b = (0:(obj.Nb-1))';
+        %         a_bt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_bt) * indices_b;
+                
+        %         % For a_tb
+        %         a_tb(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_tb) * indices;
+        %     end
+
+        %     % Initialize arrays for a_rt_a and a_rt_e
+        %     a_rt_a = zeros(obj.Nr, obj.Ns);
+        %     a_rt_e = zeros(obj.Nr, obj.Ns);
+
+        %     % Calculate a_rt_a and a_rt_e for each subcarrier
+        %     for n = 1:obj.Ns
+        %         a_rt_a(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * ((obj.Nx-1) * cos(phi_rt_a) * sin(phi_rt_e));
+        %         a_rt_e(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * (((obj.Nx-1) * sin(phi_rt_a) * cos(phi_rt_e)) - ((obj.Ny-1) * sin(phi_rt_e)));
+        %     end
+
+        %     % TODO: implement all the a vector
+        %     a_vec = compute_a_psi(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2);
+        %     a_psi_bt = a_vec;
+        %     a_vec = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2);
+        %     a_psi_tb = a_vec;
+        %     a_vec = compute_a_psi(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2);
+        %     a_psi_rt = a_vec;
+        %     a_vec = compute_a_psi(obj, obj.Nb, psi_br, obj.lambda, obj.lambda/2);
+        %     a_psi_br = a_vec;
+
+
+        %     % TODO: implement all the steering vector
+        %     a_phi_br = compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2);
+        %     a_phi_rt = compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, obj.lambda, obj.lambda/2);
+
+        %     for n = 1:N
+        %         % Calculate all partial derivatives
+        %         d_mu_array = cell(7, 1);
+                
+        %         % Extract the nth column from each steering vector matrix
+        %         a_psi_bt_n = a_psi_bt(:,n);
+        %         a_psi_tb_n = a_psi_tb(:,n);
+        %         a_psi_rt_n = a_psi_rt(:,n);
+        %         a_psi_br_n = a_psi_br(:,n);
+        %         a_phi_rt_n = a_phi_rt(:,n);
+        %         a_phi_br_n = a_phi_br(:,n);
+                
+        %         % Extract the nth element from amplitude matrices
+        %         A1_n = A1(n);
+        %         A2_n = A2(n);
+        %         A3_n = A3(n);
+        %         A4_n = A4(n);
+                
+        %         % Partial derivatives with respect to each parameter
+        %         % d_mu_d_tau_l
+        %         d_mu_array{1} = (A1_n * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
+                
+        %         % d_mu_d_tau_nl
+        %         d_mu_array{2} = (A2_n * a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
+                
+        %         d_mu_array{3} = A3_n * (a_rt(:,n) .* a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
+
+        %         % d_mu_d_phi_rt_a
+        %         d_mu_array{4} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_a(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
+                
+        %         % d_mu_d_phi_rt_e
+        %         d_mu_array{5} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_e(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
+                
+        %         % d_mu_d_psi_br
+        %         d_mu_array{6} = (A4_n * a_bt(:,n)' * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
+                
+        %         d_mu_array{7} = A4_n * (a_tb(:,n) .* a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
+
+        %         % Calculate Jacobian matrix elements
+        %         for i = 1:7
+        %             for j = 1:7
+        %                 % Get the sizes of the current derivatives
+        %                 [rows_i, cols_i] = size(d_mu_array{i});
+        %                 [rows_j, cols_j] = size(d_mu_array{j});
+                        
+        %                 % Compute the FIM entry based on dimensions
+        %                 if rows_i == rows_j && cols_i == cols_j
+        %                     % If dimensions match, use dot product
+        %                     J_zao(i,j) = J_zao(i,j) +  (2*obj.Pb/obj.sigma_c_sq)*real(sum(sum(conj(d_mu_array{i}) .* d_mu_array{j})));
+        %                 else
+        %                     J_zao(i,j) = J_zao(i,j) +  (2*obj.Pb/obj.sigma_c_sq)*real(sum(sum(d_mu_array{i} * d_mu_array{j}')));
+        %                 end
+        %             end
+        %         end                
+        %     end
+        %     obj.Jzao = J_zao;
+        %     disp("this is Jzao matrix: ");
+        %     disp(J_zao);
+        % end                         
         % ! -------------------- PEB COMPUTATION PART ENDS HERE --------------------        
 
     end
