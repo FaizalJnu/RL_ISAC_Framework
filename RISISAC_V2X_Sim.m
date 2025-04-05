@@ -129,12 +129,14 @@ classdef RISISAC_V2X_Sim < handle
             obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
             obj.initializeVisualization();
             % obj.destination = [999, 999, 0];
-            obj.H_combined = obj.compute_Heff();
+            [H_Los,H_Los_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
+            [H_NLos,H_NLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb, obj.phi);
+            obj.H_combined = obj.compute_Heff(H_Los, H_NLos);
             [obj.Wx,obj.W] = computeWx(obj);
             obj.Pb = obj.getpower();
             obj.gamma_c = computeSNR(obj);
             obj.rate = obj.getrate();
-            obj.peb = obj.calculatePerformanceMetrics(obj.Wx);
+            obj.peb = obj.calculatePerformanceMetrics(obj.Wx, H_Los_3d, H_NLos_3d);
         end
 
         function nb = get_Nb(obj)
@@ -150,16 +152,14 @@ classdef RISISAC_V2X_Sim < handle
             obj.h_nl = (sigma * complex(randn(1,1), randn(1,1))) + mu;
         end
 
-        function H_combined = compute_Heff(obj)
-            [HLos,HLos_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
-            [HNLos,HNLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
-            H_combined = HLos + HNLos;
+        function H_combined = compute_Heff(obj, H_Los, H_NLos)
+            H_combined = H_Los + H_NLos;
             obj.H_combined = H_combined;
         end
 
         function gamma_c = computeSNR(obj)
             [~,HLos_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
-            [~,HNLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
+            [~,HNLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb, obj.phi);
             obj.Pb = getpower(obj);
             gamma_c_per_subcarrier = zeros(1, obj.Ns);
             for n = 1:obj.Ns
@@ -183,9 +183,7 @@ classdef RISISAC_V2X_Sim < handle
 
         % ! -------------------- CHANNEL INITIALIZATION PART STARTS HERE --------------------        
         function initializeChannels(obj)
-            [obj.H_bt, obj.H_br, obj.H_rt] = generate_channels(obj, obj.Nt, obj.Nr, obj.Nb);   
-            obj.H_combined = compute_Heff(obj);
-            
+            [obj.H_bt, obj.H_br, obj.H_rt] = generate_channels(obj, obj.Nt, obj.Nr, obj.Nb);               
         end
 
         function initializephi(obj)
@@ -275,7 +273,7 @@ classdef RISISAC_V2X_Sim < handle
             end
         end
 
-        function a_vec = compute_a_psi(obj, Nant, psi, lambda, d)
+        function a_vec = compute_a_psi(obj, Nant, psi, ~, d)
             Ns = obj.Ns; % Number of subcarriers
             B = obj.B;   % Bandwidth (Hz)
             fc = obj.fc; % Carrier frequency (Hz)
@@ -319,7 +317,7 @@ classdef RISISAC_V2X_Sim < handle
                 % Normalize per subcarrier
                 a_phi(:, n_subcarr) = a_phi(:, n_subcarr) / sqrt(N2);
             end
-        end
+        end      
         
         function [H_Los, H_Los_3d] = generate_H_Los(obj, H_bt, Nt, Nb)            
             gamma_l = sqrt(Nb*Nt)/sqrt(obj.rho_l);
@@ -343,19 +341,13 @@ classdef RISISAC_V2X_Sim < handle
             H_Los = mean(H_Los_3d, 3);  % Average across subcarriers (Nt×Nb matrix)
         end
         
-        function [H_NLoS, H_NLoS_3d] = generate_H_NLoS(obj, H_rt, H_br, Nt, Nr, Nb)            
+        function [H_NLoS, H_NLoS_3d] = generate_H_NLoS(obj, H_rt, H_br, Nt, Nr, Nb, phi)            
             obj.rho_nl = 4;
             
             gamma_nl = sqrt(Nb*Nr)/sqrt(obj.rho_nl);
             
             [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters(obj);
             tau_nl = delays.non_line_of_sight;
-        
-            % Generate RIS phase shift matrix
-            rho_r = 1;
-            theta = 2*pi*rand(Nr,1);
-            u = rho_r * exp(1j*theta);
-            obj.phi = diag(u);
             
             % Initialize 3D channel matrix (Nt×Nb×Ns)
             H_NLoS_3d = zeros(Nt, Nb, obj.Ns);
@@ -363,7 +355,7 @@ classdef RISISAC_V2X_Sim < handle
             % Calculate H_NLoS for each subcarrier
             for n = 1:obj.Ns
                 phase = exp(1j*2*pi*obj.B*(n-1)*tau_nl/obj.Ns);
-                H_NLoS_3d(:,:,n) = gamma_nl * obj.h_nl * H_rt(:,:,n) * obj.phi * H_br(:,:,n) * phase;
+                H_NLoS_3d(:,:,n) = gamma_nl * obj.h_nl * H_rt(:,:,n) * phi * H_br(:,:,n) * phase;
             end
             
             % Return both the 3D channel matrix and its average
@@ -441,14 +433,16 @@ classdef RISISAC_V2X_Sim < handle
             % Update RIS phases based on action
             ris_phases = action(1:obj.Nr);
             obj.phi = diag(exp(1j * 2 * pi * ris_phases));
-            obj.H_combined = compute_Heff(obj);
+            [H_Los, H_Los_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
+            [H_NLos, H_NLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb, obj.phi);
+            obj.H_combined = compute_Heff(obj, H_Los, H_NLos);
             [obj.Wx,obj.W] = computeWx(obj);
             power = getpower(obj);
             obj.Pb = power;
             obj.gamma_c = computeSNR(obj);
             rate = getrate(obj);
             obj.rate = rate;
-            peb = obj.calculatePerformanceMetrics(obj.Wx);
+            peb = obj.calculatePerformanceMetrics(obj.Wx, H_Los_3d, H_NLos_3d);
             obj.peb = peb;
             % Calculate performance metrics
             reward = obj.computeReward(peb);
@@ -694,12 +688,14 @@ classdef RISISAC_V2X_Sim < handle
             % obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
             % obj.initializeVisualization();
             % obj.destination = [999, 999, 0];
-            obj.H_combined = obj.compute_Heff();
+            [H_Los, H_Los_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
+            [H_NLos, H_NLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb, obj.phi);
+            obj.H_combined = obj.compute_Heff(H_Los, H_NLos);
             [obj.Wx,obj.W] = computeWx(obj);
             obj.Pb = obj.getpower();
             obj.gamma_c = obj.computeSNR();
             obj.rate = obj.getrate();
-            obj.peb = obj.calculatePerformanceMetrics(obj.Wx);
+            obj.peb = obj.calculatePerformanceMetrics(obj.Wx, H_Los_3d, H_NLos_3d);
             % obj.calculated_values();
             % obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
 
@@ -808,24 +804,11 @@ classdef RISISAC_V2X_Sim < handle
         end
         
 
-        function [peb] = calculatePerformanceMetrics(obj, Wx)
-            [J, ~, ~] = computeFisherInformationMatrix(obj,Wx);
+        function [peb] = calculatePerformanceMetrics(obj, Wx, H_Los_3d, H_NLos_3d)
+            [J, ~, ~] = computeFisherInformationMatrix(obj,Wx, H_Los_3d, H_NLos_3d);
             CRLB = inv(J);
             obj.peb = sqrt(trace(CRLB));
             obj.peb = real(obj.peb);
-            % rate_constraint_satisfied = (obj.rate >= obj.R_min);
-
-            % if ~rate_constraint_satisfied
-            %     penalty_factor = 1 + (obj.R_min - obj.rate)/obj.R_min;
-            %     obj.peb = obj.peb * penalty_factor;
-            % end
-            % obj.peb = sqrt((real(obj.peb))^2 + (imag(obj.peb))^2)*100;
-            % obj.peb = 1+11/(1+exp(-(obj.peb-6.5)));
-            % if(obj.peb < obj.minpeb)
-            %     obj.minpeb = obj.peb;
-            % else
-            %     obj.peb = obj.minpeb;
-            % end
             peb = obj.peb;
             % disp(peb);
         end
@@ -870,7 +853,7 @@ classdef RISISAC_V2X_Sim < handle
         function [Wx, W] = computeWx(obj)
             N = obj.Ns;
             if obj.stepCount > 1
-                W_mrt = compute_Heff(obj);
+                W_mrt = obj.H_combined;
                 W_mrt = W_mrt / norm(W_mrt, 'fro');
                 W_mrt_reshaped = W_mrt(:,1);
                 W = repmat(W_mrt_reshaped, [1, obj.Ns]);
@@ -933,18 +916,19 @@ classdef RISISAC_V2X_Sim < handle
         %     end
         % end        
         
-        function [J, J_zao, T] = computeFisherInformationMatrix(obj,Wx)
+        function [J, J_zao, T] = computeFisherInformationMatrix(obj, Wx ,H_Los_3d, H_NLos_3d)
             % sigma_s = sqrt(obj.Pb/obj.gamma_c);  % Noise variance (placeholder)
             [T] = computeTransformationMatrix(obj);
-            gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
-            gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
+            % gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
+            % gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
             
-            [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, obj.Ns, obj.B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
-            [J_zao] = calculateJacobianMatrix(obj, obj.Pb, obj.Ns, Wx, A1, A2, A3, A4);
+            % [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, obj.Ns, obj.B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
+            % [J_zao] = calculateJacobianMatrix(obj, obj.Pb, obj.Ns, Wx, A1, A2, A3, A4);
             % H_Los_3d = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
             % H_NLoS_3d = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
             % J_zao = computeJZao(obj, H_Los_3d, H_NLoS_3d);
 
+            J_zao = calculate_Jzao(obj, obj.Pb, obj.Ns, Wx, H_Los_3d, H_NLos_3d);
             % Compute final Fisher Information Matrix
             J = T * J_zao * T';
         end
@@ -1012,7 +996,7 @@ classdef RISISAC_V2X_Sim < handle
         end 
 
         function [J_zao] = calculate_Jzao(obj, Pb, N, Wx, H_Los_3d, H_NLos_3d)
-            J_zao = zeros(7, 7);
+            % J_zao = zeros(7, 7);
             [~, ~, ~, ~, ~, ~, delays, angles] = computeGeometricParameters(obj);
             psi_rt = angles.ris_to_target.aoa;
             psi_bt = angles.bs_to_target_transmit;
@@ -1026,6 +1010,7 @@ classdef RISISAC_V2X_Sim < handle
             zao = {tau_l, tau_nl, psi_rt, phi_rt_a, phi_rt_e, psi_bt, psi_tb};
 
             scaling_factor = (2*obj.Pb) / obj.sigma_c_sq;
+            J_zao = zeros(7,7);
 
             for i = 1:7
                 for j = 1:7
@@ -1037,14 +1022,16 @@ classdef RISISAC_V2X_Sim < handle
                         mu = (H_Los_3d(:,:,n) + H_NLos_3d(:,:,n)) * Wx(:,n);
                         
                         % Calculate partial derivatives of mu with respect to parameters
-                        dmu_dzetai = calculate_derivative(mu, zao, i, n, H_Los_3d, H_NLos_3d, Wx);
-                        dmu_dzetaj = calculate_derivative(mu, zao, j, n, H_Los_3d, H_NLos_3d, Wx);
+                        % dmu_dzetai = calculate_derivative(mu, zao, i, n, H_Los_3d, H_NLos_3d, Wx);
+                        % dmu_dzetaj = calculate_derivative(mu, zao, j, n, H_Los_3d, H_NLos_3d, Wx);
                         
+                        dmu_i = mu / zao{i};
+                        dmu_j = mu / zao{j};
                         % Calculate the Hermitian of dmu_dzetai
-                        dmu_dzetai_H = dmu_dzetai';
+                        dmu_i_h = dmu_i';
                         
                         % Calculate inner product and take real part
-                        inner_product = dmu_dzetai_H * dmu_dzetaj;
+                        inner_product = dmu_i_h * dmu_j;
                         sum_term = sum_term + real(inner_product);
                     end
                     
@@ -1053,6 +1040,34 @@ classdef RISISAC_V2X_Sim < handle
                 end
             end
         end
+
+        % function deriv = calculate_derivative(mu, zao, param_index, n, H_Los_3d, H_NLos_3d, Wx)
+        %     % For calculating derivatives with respect to each parameter in zao
+        %     % without modifying H_NLos which is already updated in the main loop
+            
+        %     delta = 1e-6;  % Small perturbation
+            
+        %     % Create perturbed version of parameter
+        %     zao_perturbed = zao;
+        %     zao_perturbed(param_index) = zao_perturbed(param_index) + delta;
+            
+        %     % Calculate how mu would change if only this parameter changed
+        %     % This depends on how each parameter in zao affects the observation
+            
+        %     if param_index == 1  % Example for first parameter
+        %         % Calculate how mu would change based on this parameter
+        %         % This is parameter-specific and depends on your model
+        %         mu_perturbed = calculate_mu_for_perturbed_param(zao_perturbed, param_index, H_Los_3d(:,:,n), H_NLos_3d(:,:,n), Wx(:,n));
+        %     elseif param_index == 2
+        %         % Handle second parameter
+        %         mu_perturbed = calculate_mu_for_perturbed_param(zao_perturbed, param_index, H_Los_3d(:,:,n), H_NLos_3d(:,:,n), Wx(:,n));
+        %     % ... and so on for each parameter
+        %     end
+            
+        %     % Calculate derivative using finite difference
+        %     deriv = (mu_perturbed - mu) / delta;
+        % end
+
         % function [J_zao] = calculateJacobianMatrix(obj, Pb, N, Wx, A1, A2, A3, A4)
         %     % TODO: Initialize 7x7 Jacobian matrix
         %     J_zao = zeros(7, 7);

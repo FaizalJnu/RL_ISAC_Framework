@@ -11,7 +11,11 @@ class RISISACTrainer:
         # Start MATLAB engine
         print("Starting MATLAB engine...")
         self.eng = matlab.engine.start_matlab()
-        self.eng.eval("parpool('local', 10);", nargout=0) 
+        
+        if torch.cuda.is_available():
+            self.eng.eval("parpool('local', 4);", nargout=0)
+        else:
+            self.eng.eval("parpool('local', 10);", nargout=0) 
 
         # Initialize MATLAB simulation
         self.sim = self.eng.RISISAC_V2X_Sim()
