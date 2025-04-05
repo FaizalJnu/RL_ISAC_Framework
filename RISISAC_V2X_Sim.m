@@ -171,7 +171,7 @@ classdef RISISAC_V2X_Sim < handle
             gamma_c = obj.gamma_c;
         end
 
-        function Pb = getpower(obj) 
+        function Pb = getpower(obj)
             Pb = trace(obj.Wx * obj.Wx') / obj.Ns;
             obj.Pb = Pb;
         end
@@ -818,8 +818,6 @@ classdef RISISAC_V2X_Sim < handle
             xb = obj.bs_loc(1);    yb = obj.bs_loc(2);    zb = obj.bs_loc(3);
             xr = obj.ris_loc(1);   yr = obj.ris_loc(2);   zr = obj.ris_loc(3);
             xt = obj.target_loc(1); yt = obj.target_loc(2);
-            % disp(xt)
-            % disp(yt)
 
             [~, L2, L3, ~, L_proj2, ~, ~, ~] = computeGeometricParameters(obj);
 
@@ -838,15 +836,6 @@ classdef RISISAC_V2X_Sim < handle
             T(2,5) = (zr*(yr-yt)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
             T(2,6) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
             T(2,7) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
-
-            % disp ("this is L2")
-            % disp(L2)
-            % disp("this is L3")
-            % disp(L3)
-            % disp("this is Lproj2")
-            % disp(L_proj2)
-            % disp(T)
-
         end
         
         % ! Don't remove this
@@ -930,7 +919,7 @@ classdef RISISAC_V2X_Sim < handle
 
             J_zao = calculate_Jzao(obj, obj.Pb, obj.Ns, Wx, H_Los_3d, H_NLos_3d);
             % Compute final Fisher Information Matrix
-            J = T * J_zao * T';
+            J = T * J_zao * conj(T');
         end
 
         % function J_zao = computeJZao(obj, H_Los, H_NLoS)
@@ -996,47 +985,90 @@ classdef RISISAC_V2X_Sim < handle
         end 
 
         function [J_zao] = calculate_Jzao(obj, Pb, N, Wx, H_Los_3d, H_NLos_3d)
-            % J_zao = zeros(7, 7);
+            % Initialize Fisher Information Matrix
+            J_zao = zeros(7, 7);
+            
+            % Compute geometric parameters
             [~, ~, ~, ~, ~, ~, delays, angles] = computeGeometricParameters(obj);
+            
+            % Extract parameters
             psi_rt = angles.ris_to_target.aoa;
             psi_bt = angles.bs_to_target_transmit;
             psi_tb = angles.bs_to_target_receive;
             phi_rt_a = angles.ris_to_target.azimuth;
             phi_rt_e = angles.ris_to_target.elevation_angle;
-
             tau_l = delays.line_of_sight;
             tau_nl = delays.non_line_of_sight;
-
+            
             zao = {tau_l, tau_nl, psi_rt, phi_rt_a, phi_rt_e, psi_bt, psi_tb};
-
-            scaling_factor = (2*obj.Pb) / obj.sigma_c_sq;
-            J_zao = zeros(7,7);
-
+            
+            % Calculate scaling factor with normalization to prevent numerical issues
+            scaling_factor = (2*Pb) / obj.sigma_c_sq;
+            norm_factor = 1e12;  % Adjust this based on your specific value ranges
+            scaling_factor = scaling_factor / norm_factor;
+            
+            % Log the actual values for debugging
+            % disp(['Original scaling factor: ', num2str(scaling_factor * norm_factor)]);
+            % disp(['Normalized scaling factor: ', num2str(scaling_factor)]);
+            
+            % Rest of the calculation as before
             for i = 1:7
                 for j = 1:7
                     sum_term = 0;
-                    
-                    % Sum over all subcarriers
-                    for n = 1:10
-                        % Calculate mu for this subcarrier
+                    for n = 1:N
                         mu = (H_Los_3d(:,:,n) + H_NLos_3d(:,:,n)) * Wx(:,n);
+                        disp(mu)
                         
-                        % Calculate partial derivatives of mu with respect to parameters
-                        % dmu_dzetai = calculate_derivative(mu, zao, i, n, H_Los_3d, H_NLos_3d, Wx);
-                        % dmu_dzetaj = calculate_derivative(mu, zao, j, n, H_Los_3d, H_NLos_3d, Wx);
+                        % Use a more accurate derivative calculation
+                        dmu_i = calculate_derivative(obj,mu, zao, i, n, H_Los_3d, H_NLos_3d, Wx);
+                        dmu_j = calculate_derivative(obj,mu, zao, j, n, H_Los_3d, H_NLos_3d, Wx);
                         
-                        dmu_i = mu / zao{i};
-                        dmu_j = mu / zao{j};
-                        % Calculate the Hermitian of dmu_dzetai
-                        dmu_i_h = dmu_i';
-                        
-                        % Calculate inner product and take real part
+                        dmu_i_h = conj(dmu_i');
                         inner_product = dmu_i_h * dmu_j;
                         sum_term = sum_term + real(inner_product);
                     end
                     
-                    % Multiply by scaling factor and store in J_zao matrix
                     J_zao(i,j) = scaling_factor * sum_term;
+                end
+            end
+        end
+        
+        % Helper function for calculating derivatives
+        function dmu = calculate_derivative(obj, mu, zao_params, param_idx, subcarrier_idx, H_Los, H_NLos, Wx)
+            % This function should implement proper partial derivative calculation
+            % based on the channel model and parameter type
+            
+            % Different derivative calculations for different parameters
+            % For time delays (param_idx 1-2)
+            if param_idx <= 2
+                % Time domain derivative (frequency domain multiplication)
+                omega_n = 2*pi*subcarrier_idx; % Angular frequency
+                if param_idx == 1 % LoS delay
+                    H_derivative = -1j * omega_n * H_Los(:,:,subcarrier_idx);
+                else % NLoS delay
+                    H_derivative = -1j * omega_n * H_NLos(:,:,subcarrier_idx);
+                end
+                dmu = H_derivative * Wx(:,subcarrier_idx);
+            
+            % For angle parameters (param_idx 3-7)
+            else
+                % Calculate based on specific angle parameter
+                % This would depend on your channel model
+                % Example for simplicity (needs to be replaced with actual model):
+                param_value = zao_params{param_idx};
+                
+                % Different derivatives for different angle parameters
+                % (This is a placeholder - actual calculations would be model-specific)
+                if param_idx == 3 % psi_rt
+                    dmu = mu * (-1j) * cos(param_value);
+                elseif param_idx == 4 % phi_rt_a
+                    dmu = mu * (-1j) * sin(param_value);
+                elseif param_idx == 5 % phi_rt_e
+                    dmu = mu * (-1j) * sin(param_value);
+                elseif param_idx == 6 % psi_bt
+                    dmu = mu * (-1j) * cos(param_value);
+                else % psi_tb
+                    dmu = mu * (-1j) * cos(param_value);
                 end
             end
         end
