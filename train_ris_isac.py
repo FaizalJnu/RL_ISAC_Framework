@@ -12,10 +12,10 @@ class RISISACTrainer:
         print("Starting MATLAB engine...")
         self.eng = matlab.engine.start_matlab()
         
-        if torch.cuda.is_available():
-            self.eng.eval("parpool('local', 4);", nargout=0)
-        else:
-            self.eng.eval("parpool('local', 10);", nargout=0) 
+        # if torch.cuda.is_available():
+        #     self.eng.eval("parpool('local', 4);", nargout=0)
+        # else:
+        #     self.eng.eval("parpool('local', 10);", nargout=0) 
 
         # Initialize MATLAB simulation
         self.sim = self.eng.RISISAC_V2X_Sim()
@@ -312,7 +312,7 @@ class RISISACTrainer:
     
     def close(self):
         """Clean up MATLAB engine"""
-        self.eng.eval("delete(gcp('nocreate'));", nargout=0)
+        # self.eng.eval("delete(gcp('nocreate'));", nargout=0)
         self.eng.quit()
 
 if __name__ == "__main__":

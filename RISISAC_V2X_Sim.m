@@ -14,7 +14,9 @@ classdef RISISAC_V2X_Sim < handle
         rate = 0
         c = 3e8;
         lambda = 3e8/28e9;
-        sigma_c_sq = 1.38e-23 * 290 * 20e6; 
+        % sigma_c_sq = 1.38e-23 * 290 * 20e6;
+        sigma_c_sq = 10*log10(8.004e-11); 
+        Pb_dbm = 0;
 
         h_l = 0;
         h_nl = 0;
@@ -174,6 +176,7 @@ classdef RISISAC_V2X_Sim < handle
         function Pb = getpower(obj)
             Pb = trace(obj.Wx * obj.Wx') / obj.Ns;
             obj.Pb = Pb;
+            obj.Pb_dbm = 10*log10(Pb*1000);
         end
 
         function rate = getrate(obj)
@@ -331,14 +334,15 @@ classdef RISISAC_V2X_Sim < handle
             % Calculate H_Los for each subcarrier
             for n = 1:obj.Ns
                 % Calculate phase shift for nth subcarrier
-                phase = exp(1j*2*pi*obj.B*(n-1)*tau_l/obj.Ns);
+                phase = exp(1j*2*pi*obj.B*(n/obj.Ns)*tau_l);
                 
                 % H_bt is now a 3D matrix, so we use H_bt(:,:,n)
                 H_Los_3d(:,:,n) = gamma_l * obj.h_l * H_bt(:,:,n) * phase;
             end
-        
             % Return both the 3D channel matrix and its average
             H_Los = mean(H_Los_3d, 3);  % Average across subcarriers (Nt×Nb matrix)
+            % disp("this is HLos");
+            % disp(H_Los);
         end
         
         function [H_NLoS, H_NLoS_3d] = generate_H_NLoS(obj, H_rt, H_br, Nt, Nr, Nb, phi)            
@@ -354,12 +358,15 @@ classdef RISISAC_V2X_Sim < handle
             
             % Calculate H_NLoS for each subcarrier
             for n = 1:obj.Ns
-                phase = exp(1j*2*pi*obj.B*(n-1)*tau_nl/obj.Ns);
+                phase = exp(1j*2*pi*obj.B*(n/obj.Ns)*tau_nl);
                 H_NLoS_3d(:,:,n) = gamma_nl * obj.h_nl * H_rt(:,:,n) * phi * H_br(:,:,n) * phase;
             end
             
             % Return both the 3D channel matrix and its average
             H_NLoS = mean(H_NLoS_3d, 3);  % Average across subcarriers (Nt×Nb matrix)
+            % disp("this is HNlos");
+            % disp(H_NLoS);
+
         end
                
         
@@ -917,7 +924,7 @@ classdef RISISAC_V2X_Sim < handle
             % H_NLoS_3d = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
             % J_zao = computeJZao(obj, H_Los_3d, H_NLoS_3d);
 
-            J_zao = calculate_Jzao(obj, obj.Pb, obj.Ns, Wx, H_Los_3d, H_NLos_3d);
+            J_zao = calculate_Jzao(obj, obj.Pb_dbm, obj.Ns, Wx, H_Los_3d, H_NLos_3d);
             % Compute final Fisher Information Matrix
             J = T * J_zao * conj(T');
         end
@@ -984,7 +991,7 @@ classdef RISISAC_V2X_Sim < handle
             end
         end 
 
-        function [J_zao] = calculate_Jzao(obj, Pb, N, Wx, H_Los_3d, H_NLos_3d)
+        function [J_zao] = calculate_Jzao(obj, Pb_dbm, N, Wx, H_Los_3d, H_NLos_3d)
             % Initialize Fisher Information Matrix
             J_zao = zeros(7, 7);
             
@@ -1003,9 +1010,9 @@ classdef RISISAC_V2X_Sim < handle
             zao = {tau_l, tau_nl, psi_rt, phi_rt_a, phi_rt_e, psi_bt, psi_tb};
             
             % Calculate scaling factor with normalization to prevent numerical issues
-            scaling_factor = (2*Pb) / obj.sigma_c_sq;
-            norm_factor = 1e12;  % Adjust this based on your specific value ranges
-            scaling_factor = scaling_factor / norm_factor;
+            scaling_factor = (2*Pb_dbm) / obj.sigma_c_sq;
+            % norm_factor = 1e8;  % Adjust this based on your specific value ranges
+            % scaling_factor = scaling_factor / norm_factor;
             
             % Log the actual values for debugging
             % disp(['Original scaling factor: ', num2str(scaling_factor * norm_factor)]);
@@ -1017,7 +1024,7 @@ classdef RISISAC_V2X_Sim < handle
                     sum_term = 0;
                     for n = 1:N
                         mu = (H_Los_3d(:,:,n) + H_NLos_3d(:,:,n)) * Wx(:,n);
-                        disp(mu)
+                        % disp(mu)
                         
                         % Use a more accurate derivative calculation
                         dmu_i = calculate_derivative(obj,mu, zao, i, n, H_Los_3d, H_NLos_3d, Wx);
