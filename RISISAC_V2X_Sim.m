@@ -833,66 +833,66 @@ classdef RISISAC_V2X_Sim < handle
             % disp(peb);
         end
         
-        % function [T] = computeTransformationMatrix(obj)
-        %     T = zeros(2, 7);
-        %     xb = obj.bs_loc(1);    yb = obj.bs_loc(2);    zb = obj.bs_loc(3);
-        %     xr = obj.ris_loc(1);   yr = obj.ris_loc(2);   zr = obj.ris_loc(3);
-        %     xt = obj.target_loc(1); yt = obj.target_loc(2);
-
-        %     [~, L2, L3, ~, L_proj2, ~, ~, ~] = computeGeometricParameters(obj);
-
-        %     print(xb);
-        %     print(xr);
-        %     print()
-
-        %     T(1,1) = (xt-xb) / (obj.c*L3);
-        %     T(1,2) = (xt-xr) / (obj.c*L2);
-        %     T(1,3) = (zr*(xt-xr)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
-        %     T(1,4) = ((yr-yt)*(xr-xt)) / ((L2^3)*sqrt(1-((yr-yt)^2)/(L2)^2));
-        %     T(1,5) = (zr*(xr-xt)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
-        %     T(1,6) = (zb*(xt-xb)) / ((L3^3)*sqrt(1-L3^2));
-        %     T(1,7) = (zb*(xt-xb)) / ((L3^3)*sqrt(1-L3^2));
-            
-        %     T(2,1) = (yt-yb) / (obj.c*L3);
-        %     T(2,2) = (yt-yr) / (obj.c*L2);
-        %     T(2,3) = (zr*(yt-yr)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
-        %     T(2,4) = ((L_proj2^2) + (yr-yt)*(xr-xt)) / ((L2^3)*sqrt(1-((yr-yt)^2)/(L2)^2));
-        %     T(2,5) = (zr*(yr-yt)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
-        %     T(2,6) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
-        %     T(2,7) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
-        % end
-
         function [T] = computeTransformationMatrix(obj)
-            % Extract locations
-            xb = obj.bs_loc(1); yb = obj.bs_loc(2); zb = obj.bs_loc(3);
-            xr = obj.ris_loc(1); yr = obj.ris_loc(2); zr = obj.ris_loc(3);
-            xt = obj.target_loc(1); yt = obj.target_loc(2);
-        
-            % Get geometric values
-            [~, L2, L3, ~, L_proj2, L_proj3, ~, ~] = computeGeometricParameters(obj);
-        
-            % Initialize T
             T = zeros(2, 7);
-        
-            % First row: partial derivatives w.r.t. x_t
-            T(1,1) = (xt - xb) / (obj.c * L3);                                              % dτ_l/dx_t
-            T(1,2) = (xt - xr) / (obj.c * L2);                                              % dτ_nl/dx_t
-            T(1,3) = (zr * (xt - xr)) / (L2^3 * sqrt(1 - (zr^2) / L2^2));                   % dψ_rt/dx_t
-            T(1,4) = ((yr - yt) * (xr - xt)) / (L2^3 * sqrt(1 - ((yr - yt)^2) / L_proj2^2));% dφ_rt^a/dx_t
-            T(1,5) = (zr * (xr - xt)) / (L2^3 * sqrt(1 - (zr^2) / L2^2));                   % dφ_rt^e/dx_t
-            T(1,6) = (zb * (xt - xb)) / (L3^3 * sqrt(1 - (L_proj3^2) / L3^2));              % dψ_bt/dx_t
-            T(1,7) = (zb * (xt - xb)) / (L3^3 * sqrt(1 - (L_proj3^2) / L3^2));              % dψ_tb/dx_t
-        
-            % Second row: partial derivatives w.r.t. y_t
-            T(2,1) = (yt - yb) / (obj.c * L3);                                              % dτ_l/dy_t
-            T(2,2) = (yt - yr) / (obj.c * L2);                                              % dτ_nl/dy_t
-            T(2,3) = (zr * (yt - yr)) / (L2^3 * sqrt(1 - (zr^2) / L2^2));                   % dψ_rt/dy_t
-            T(2,4) = (L_proj2^2 + (yr - yt)*(xr - xt)) / (L2^3 * sqrt(1 - ((yr - yt)^2) / L_proj2^2)); % dφ_rt^d/dy_t
-            T(2,5) = (zr * (yr - yt)) / (L2^3 * sqrt(1 - (zr^2) / L2^2));                   % dφ_rt^e/dy_t
-            T(2,6) = (zb * (yt - yb)) / (L3^3 * sqrt(1 - (L_proj3^2) / L3^2));              % dψ_bt/dy_t
-            T(2,7) = (zb * (yt - yb)) / (L3^3 * sqrt(1 - (L_proj3^2) / L3^2));              % dψ_tb/dy_t
+            xb = obj.bs_loc(1);    yb = obj.bs_loc(2);    zb = obj.bs_loc(3);
+            xr = obj.ris_loc(1);   yr = obj.ris_loc(2);   zr = obj.ris_loc(3);
+            xt = obj.target_loc(1); yt = obj.target_loc(2);
 
+            [~, L2, L3, ~, L_proj2, ~, ~, ~] = computeGeometricParameters(obj);
+
+            % print(xb);
+            % print(xr);
+            % print()
+
+            T(1,1) = (xt-xb) / (obj.c*L3);
+            T(1,2) = (xt-xr) / (obj.c*L2);
+            T(1,3) = (zr*(xt-xr)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
+            T(1,4) = ((yr-yt)*(xr-xt)) / ((L2^3)*sqrt(1-((yr-yt)^2)/(L2)^2));
+            T(1,5) = (zr*(xr-xt)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
+            T(1,6) = (zb*(xt-xb)) / ((L3^3)*sqrt(1-L3^2));
+            T(1,7) = (zb*(xt-xb)) / ((L3^3)*sqrt(1-L3^2));
+            
+            T(2,1) = (yt-yb) / (obj.c*L3);
+            T(2,2) = (yt-yr) / (obj.c*L2);
+            T(2,3) = (zr*(yt-yr)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
+            T(2,4) = ((L_proj2^2) + (yr-yt)*(xr-xt)) / ((L2^3)*sqrt(1-((yr-yt)^2)/(L2)^2));
+            T(2,5) = (zr*(yr-yt)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
+            T(2,6) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
+            T(2,7) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
         end
+
+        % function [T] = computeTransformationMatrix(obj)
+        %     % Extract locations
+        %     xb = obj.bs_loc(1); yb = obj.bs_loc(2); zb = obj.bs_loc(3);
+        %     xr = obj.ris_loc(1); yr = obj.ris_loc(2); zr = obj.ris_loc(3);
+        %     xt = obj.target_loc(1); yt = obj.target_loc(2);
+        
+        %     % Get geometric values
+        %     [~, L2, L3, ~, L_proj2, L_proj3, ~, ~] = computeGeometricParameters(obj);
+        
+        %     % Initialize T
+        %     T = zeros(2, 7);
+        
+        %     % First row: partial derivatives w.r.t. x_t
+        %     T(1,1) = (xt - xb) / (obj.c * L3);                                              % dτ_l/dx_t
+        %     T(1,2) = (xt - xr) / (obj.c * L2);                                              % dτ_nl/dx_t
+        %     T(1,3) = (zr * (xt - xr)) / (L2^3 * sqrt(1 - (zr^2) / L2^2));                   % dψ_rt/dx_t
+        %     T(1,4) = ((yr - yt) * (xr - xt)) / (L2^3 * sqrt(1 - ((yr - yt)^2) / L_proj2^2));% dφ_rt^a/dx_t
+        %     T(1,5) = (zr * (xr - xt)) / (L2^3 * sqrt(1 - (zr^2) / L2^2));                   % dφ_rt^e/dx_t
+        %     T(1,6) = (zb * (xt - xb)) / (L3^3 * sqrt(1 - (L_proj3^2) / L3^2));              % dψ_bt/dx_t
+        %     T(1,7) = (zb * (xt - xb)) / (L3^3 * sqrt(1 - (L_proj3^2) / L3^2));              % dψ_tb/dx_t
+        
+        %     % Second row: partial derivatives w.r.t. y_t
+        %     T(2,1) = (yt - yb) / (obj.c * L3);                                              % dτ_l/dy_t
+        %     T(2,2) = (yt - yr) / (obj.c * L2);                                              % dτ_nl/dy_t
+        %     T(2,3) = (zr * (yt - yr)) / (L2^3 * sqrt(1 - (zr^2) / L2^2));                   % dψ_rt/dy_t
+        %     T(2,4) = (L_proj2^2 + (yr - yt)*(xr - xt)) / (L2^3 * sqrt(1 - ((yr - yt)^2) / L_proj2^2)); % dφ_rt^d/dy_t
+        %     T(2,5) = (zr * (yr - yt)) / (L2^3 * sqrt(1 - (zr^2) / L2^2));                   % dφ_rt^e/dy_t
+        %     T(2,6) = (zb * (yt - yb)) / (L3^3 * sqrt(1 - (L_proj3^2) / L3^2));              % dψ_bt/dy_t
+        %     T(2,7) = (zb * (yt - yb)) / (L3^3 * sqrt(1 - (L_proj3^2) / L3^2));              % dψ_tb/dy_t
+
+        % end
         
         
         % ! Don't remove this
@@ -1099,19 +1099,51 @@ classdef RISISAC_V2X_Sim < handle
         function dmu = calculate_derivative(obj, mu, zao_params, param_idx, subcarrier_idx, H_Los, H_NLos, Wx)
             % This function should implement proper partial derivative calculation
             % based on the channel model and parameter type
-            
+            [~, ~, ~, ~, ~, ~, delays, angles] = computeGeometricParameters(obj);
+            N=obj.Ns;
+            tau_l = delays.line_of_sight;
+            tau_nl = delays.non_line_of_sight;
             % Different derivative calculations for different parameters
             % For time delays (param_idx 1-2)
+            psi_bt = angles.bs_to_target_transmit;
+            psi_tb = angles.bs_to_target_receive;
+            
+            % BS-RIS channel parameters
+            psi_br = angles.bs_to_ris.azimuth;
+            phi_abr = angles.bs_to_ris.elevation_azimuth;
+            phi_ebr = angles.bs_to_ris.elevation_angle;
+
+            a_psi_br = compute_a_psi(obj, obj.Nb, psi_br, obj.lambda, obj.lambda/2);
+            a_phi_abr = compute_a_phi(obj, sqrt(obj.Nr), phi_abr, phi_ebr, obj.lambda, obj.lambda/2);
+            
+            % RIS-Target channel parameters
+            psi_rt = angles.ris_to_target.azimuth;
+            phi_art = angles.ris_to_target.elevation_angle;
+            phi_ert = angles.ris_to_target.elevation_angle;
+
+            a_psi_rt = compute_a_psi(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2);
+            a_phi_art = compute_a_phi(obj, sqrt(obj.Nr), phi_art, phi_ert, obj.lambda/2, obj.lambda/2);
+
+            % Get frequency-dependent steering vectors (dimensions: Nb×Ns and Nt×Ns)
+            a_psi_bt = compute_a_psi(obj, obj.Nb, psi_bt, obj.lambda, obj.lambda/2);
+            a_psi_tb = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2);
+
+            a_rt = 1j * (2*pi/obj.lambda) * cos(psi_rt) * diag(0:obj.Nt-1);
+            freq_factor = (subcarrier_idx / N);
             if param_idx <= 2
                 % Time domain derivative (frequency domain multiplication)
-                omega_n = 2*pi*subcarrier_idx; % Angular frequency
+                % omega_n = 2*pi*subcarrier_idx; % Angular frequency
                 if param_idx == 1 % LoS delay
-                    H_derivative = -1j * omega_n * H_Los(:,:,subcarrier_idx);
+                    dmu = gamma_l * obj.h_l * (1j * 2 * pi * obj.B * freq_factor) * ...
+                        exp(1j * 2 * pi * obj.B * freq_factor * tau_l) * ...
+                        a_psi_bt * conj(a_psi_tb') * Wx(:,subcarrier_idx);
+
                 else % NLoS delay
-                    H_derivative = -1j * omega_n * H_NLos(:,:,subcarrier_idx);
+                    dmu = gamma_nl * obj.h_nl * (1j * 2 * pi * obj.B * freq_factor) * ...
+                        exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
+                        a_psi_rt * conj(a_phi_art') * obj.phi * a_phi_abr * conj(a_psi_br') *...
+                        Wx(:, subcarrier_idx);
                 end
-                dmu = H_derivative * Wx(:,subcarrier_idx);
-            
             % For angle parameters (param_idx 3-7)
             else
                 % Calculate based on specific angle parameter
@@ -1122,7 +1154,9 @@ classdef RISISAC_V2X_Sim < handle
                 % Different derivatives for different angle parameters
                 % (This is a placeholder - actual calculations would be model-specific)
                 if param_idx == 3 % psi_rt
-                    dmu = mu * (-1j) * cos(param_value);
+                    dmu = gamma_nl * obj.h_nl * ...
+                        exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
+                        a_rt * a_psi_rt * conj(a_phi_art') * 
                 elseif param_idx == 4 % phi_rt_a
                     dmu = mu * (-1j) * sin(param_value);
                 elseif param_idx == 5 % phi_rt_e
