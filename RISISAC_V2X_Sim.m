@@ -14,7 +14,7 @@ classdef RISISAC_V2X_Sim < handle
         rate = 0
         c = 3e8;
         lambda = 3e8/28e9;
-        % sigma_c_sq = 1.38e-23 * 290 * 20e6;
+        sigma_c_sq_linear = 8.004e-11;
         sigma_c_sq = 10*log10(8.004e-11); 
         Pb_dbm = 0;
 
@@ -166,25 +166,30 @@ classdef RISISAC_V2X_Sim < handle
             gamma_c_per_subcarrier = zeros(1, obj.Ns);
             for n = 1:obj.Ns
                 H_combined_n = HLos_3d(:,:,n) + HNLos_3d(:,:,n);
-                gamma_c_per_subcarrier(n) = obj.Pb_dbm * norm(H_combined_n * obj.W, 'fro')^2 / obj.sigma_c_sq;
+                gamma_c_per_subcarrier(n) = obj.Pb * norm(H_combined_n * obj.W, 'fro')^2 / obj.sigma_c_sq_linear;
             end
             obj.gamma_c = obj.Ns / sum(1 ./ gamma_c_per_subcarrier);  
             obj.SNR = 10 * log10(obj.gamma_c);
             gamma_c = obj.gamma_c;
             % disp(gamma_c);
+            % disp("Power (Watts): " + obj.Pb);
+            % disp("Noise power: " + obj.sigma_c_sq_linear);
+            % disp("gamma_c_per_subcarrier: ");
+            % disp(gamma_c_per_subcarrier);
         end
 
         function Pb = getpower(obj)
             Pb = trace(obj.Wx * obj.Wx') / obj.Ns;
             obj.Pb = Pb;
-            
+            % disp(Pb);
             obj.Pb_dbm = 10*log10(Pb*1000);
-            disp(obj.Pb_dbm);
+            % disp(obj.Pb_dbm);
         end
 
         function rate = getrate(obj)
             rate = obj.B*log2(1+obj.gamma_c);
             obj.rate = real(rate);
+            % disp(rate);
         end
 
         % ! -------------------- CHANNEL INITIALIZATION PART STARTS HERE --------------------        
@@ -449,6 +454,7 @@ classdef RISISAC_V2X_Sim < handle
             [obj.Wx,obj.W] = computeWx(obj);
             power = getpower(obj);
             obj.Pb = power;
+            power = obj.Pb_dbm;
             obj.gamma_c = computeSNR(obj);
             rate = getrate(obj);
             obj.rate = rate;
@@ -816,37 +822,78 @@ classdef RISISAC_V2X_Sim < handle
 
         function [peb] = calculatePerformanceMetrics(obj, Wx, H_Los_3d, H_NLos_3d)
             [J, ~, ~] = computeFisherInformationMatrix(obj,Wx, H_Los_3d, H_NLos_3d);
+
             CRLB = inv(J);
             obj.peb = sqrt(trace(CRLB));
             obj.peb = real(obj.peb);
             peb = obj.peb;
+            % disp("this is peb: " + peb);
+            % disp("this is J matrix: ");
+            % disp(J);
             % disp(peb);
         end
         
-        function [T] = computeTransformationMatrix(obj)
-            T = zeros(2, 7);
-            xb = obj.bs_loc(1);    yb = obj.bs_loc(2);    zb = obj.bs_loc(3);
-            xr = obj.ris_loc(1);   yr = obj.ris_loc(2);   zr = obj.ris_loc(3);
-            xt = obj.target_loc(1); yt = obj.target_loc(2);
+        % function [T] = computeTransformationMatrix(obj)
+        %     T = zeros(2, 7);
+        %     xb = obj.bs_loc(1);    yb = obj.bs_loc(2);    zb = obj.bs_loc(3);
+        %     xr = obj.ris_loc(1);   yr = obj.ris_loc(2);   zr = obj.ris_loc(3);
+        %     xt = obj.target_loc(1); yt = obj.target_loc(2);
 
-            [~, L2, L3, ~, L_proj2, ~, ~, ~] = computeGeometricParameters(obj);
+        %     [~, L2, L3, ~, L_proj2, ~, ~, ~] = computeGeometricParameters(obj);
 
-            T(1,1) = (xt-xb) / (obj.c*L3);
-            T(1,2) = (xt-xr) / (obj.c*L2);
-            T(1,3) = (zr*(xt-xr)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
-            T(1,4) = ((yr-yt)*(xr-xt)) / ((L2^3)*sqrt(1-((yr-yt)^2)/(L2)^2));
-            T(1,5) = (zr*(xr-xt)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
-            T(1,6) = (zb*(xt-xb)) / ((L3^3)*sqrt(1-L3^2));
-            T(1,7) = (zb*(xt-xb)) / ((L3^3)*sqrt(1-L3^2));
+        %     print(xb);
+        %     print(xr);
+        %     print()
+
+        %     T(1,1) = (xt-xb) / (obj.c*L3);
+        %     T(1,2) = (xt-xr) / (obj.c*L2);
+        %     T(1,3) = (zr*(xt-xr)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
+        %     T(1,4) = ((yr-yt)*(xr-xt)) / ((L2^3)*sqrt(1-((yr-yt)^2)/(L2)^2));
+        %     T(1,5) = (zr*(xr-xt)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
+        %     T(1,6) = (zb*(xt-xb)) / ((L3^3)*sqrt(1-L3^2));
+        %     T(1,7) = (zb*(xt-xb)) / ((L3^3)*sqrt(1-L3^2));
             
-            T(2,1) = (yt-yb) / (obj.c*L3);
-            T(2,2) = (yt-yr) / (obj.c*L2);
-            T(2,3) = (zr*(yt-yr)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
-            T(2,4) = ((L_proj2^2) + (yr-yt)*(xr-xt)) / ((L2^3)*sqrt(1-((yr-yt)^2)/(L2)^2));
-            T(2,5) = (zr*(yr-yt)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
-            T(2,6) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
-            T(2,7) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
+        %     T(2,1) = (yt-yb) / (obj.c*L3);
+        %     T(2,2) = (yt-yr) / (obj.c*L2);
+        %     T(2,3) = (zr*(yt-yr)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
+        %     T(2,4) = ((L_proj2^2) + (yr-yt)*(xr-xt)) / ((L2^3)*sqrt(1-((yr-yt)^2)/(L2)^2));
+        %     T(2,5) = (zr*(yr-yt)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
+        %     T(2,6) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
+        %     T(2,7) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
+        % end
+
+        function [T] = computeTransformationMatrix(obj)
+            % Extract locations
+            xb = obj.bs_loc(1); yb = obj.bs_loc(2); zb = obj.bs_loc(3);
+            xr = obj.ris_loc(1); yr = obj.ris_loc(2); zr = obj.ris_loc(3);
+            xt = obj.target_loc(1); yt = obj.target_loc(2);
+        
+            % Get geometric values
+            [~, L2, L3, ~, L_proj2, L_proj3, ~, ~] = computeGeometricParameters(obj);
+        
+            % Initialize T
+            T = zeros(2, 7);
+        
+            % First row: partial derivatives w.r.t. x_t
+            T(1,1) = (xt - xb) / (obj.c * L3);                                              % dτ_l/dx_t
+            T(1,2) = (xt - xr) / (obj.c * L2);                                              % dτ_nl/dx_t
+            T(1,3) = (zr * (xt - xr)) / (L2^3 * sqrt(1 - (zr^2) / L2^2));                   % dψ_rt/dx_t
+            T(1,4) = ((yr - yt) * (xr - xt)) / (L2^3 * sqrt(1 - ((yr - yt)^2) / L_proj2^2));% dφ_rt^a/dx_t
+            T(1,5) = (zr * (xr - xt)) / (L2^3 * sqrt(1 - (zr^2) / L2^2));                   % dφ_rt^e/dx_t
+            T(1,6) = (zb * (xt - xb)) / (L3^3 * sqrt(1 - (L_proj3^2) / L3^2));              % dψ_bt/dx_t
+            T(1,7) = (zb * (xt - xb)) / (L3^3 * sqrt(1 - (L_proj3^2) / L3^2));              % dψ_tb/dx_t
+        
+            % Second row: partial derivatives w.r.t. y_t
+            T(2,1) = (yt - yb) / (obj.c * L3);                                              % dτ_l/dy_t
+            T(2,2) = (yt - yr) / (obj.c * L2);                                              % dτ_nl/dy_t
+            T(2,3) = (zr * (yt - yr)) / (L2^3 * sqrt(1 - (zr^2) / L2^2));                   % dψ_rt/dy_t
+            T(2,4) = (L_proj2^2 + (yr - yt)*(xr - xt)) / (L2^3 * sqrt(1 - ((yr - yt)^2) / L_proj2^2)); % dφ_rt^d/dy_t
+            T(2,5) = (zr * (yr - yt)) / (L2^3 * sqrt(1 - (zr^2) / L2^2));                   % dφ_rt^e/dy_t
+            T(2,6) = (zb * (yt - yb)) / (L3^3 * sqrt(1 - (L_proj3^2) / L3^2));              % dψ_bt/dy_t
+            T(2,7) = (zb * (yt - yb)) / (L3^3 * sqrt(1 - (L_proj3^2) / L3^2));              % dψ_tb/dy_t
+
         end
+        
         
         % ! Don't remove this
         function [Wx, W] = computeWx(obj)
@@ -918,6 +965,8 @@ classdef RISISAC_V2X_Sim < handle
         function [J, J_zao, T] = computeFisherInformationMatrix(obj, Wx ,H_Los_3d, H_NLos_3d)
             % sigma_s = sqrt(obj.Pb/obj.gamma_c);  % Noise variance (placeholder)
             [T] = computeTransformationMatrix(obj);
+            % disp("this is T: ")
+            % disp(T)
             % gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
             % gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
             
@@ -1036,11 +1085,14 @@ classdef RISISAC_V2X_Sim < handle
                         dmu_i_h = conj(dmu_i');
                         inner_product = dmu_i_h * dmu_j;
                         sum_term = sum_term + real(inner_product);
+
                     end
                     
                     J_zao(i,j) = scaling_factor * sum_term;
                 end
             end
+            % disp("this is jzao matrix: ");
+            % disp(J_zao);
         end
         
         % Helper function for calculating derivatives
