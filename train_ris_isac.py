@@ -186,7 +186,7 @@ class RISISACTrainer:
                 if(step==1):
                     initial_peb = current_peb
                             
-                rate_values[episode].append(float(rate))
+                rate_values[episode].append(float(np.real(rate)))
                 power_values[episode].append(float(power))
                 peb_ae[episode].append(current_peb)
                 # Track PEB values

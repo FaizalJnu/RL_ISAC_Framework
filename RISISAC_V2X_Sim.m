@@ -166,22 +166,25 @@ classdef RISISAC_V2X_Sim < handle
             gamma_c_per_subcarrier = zeros(1, obj.Ns);
             for n = 1:obj.Ns
                 H_combined_n = HLos_3d(:,:,n) + HNLos_3d(:,:,n);
-                gamma_c_per_subcarrier(n) = obj.Pb * norm(H_combined_n * obj.W, 'fro')^2 / obj.sigma_c_sq;
+                gamma_c_per_subcarrier(n) = obj.Pb_dbm * norm(H_combined_n * obj.W, 'fro')^2 / obj.sigma_c_sq;
             end
             obj.gamma_c = obj.Ns / sum(1 ./ gamma_c_per_subcarrier);  
             obj.SNR = 10 * log10(obj.gamma_c);
             gamma_c = obj.gamma_c;
+            % disp(gamma_c);
         end
 
         function Pb = getpower(obj)
             Pb = trace(obj.Wx * obj.Wx') / obj.Ns;
             obj.Pb = Pb;
+            
             obj.Pb_dbm = 10*log10(Pb*1000);
+            disp(obj.Pb_dbm);
         end
 
         function rate = getrate(obj)
             rate = obj.B*log2(1+obj.gamma_c);
-            obj.rate = rate;
+            obj.rate = real(rate);
         end
 
         % ! -------------------- CHANNEL INITIALIZATION PART STARTS HERE --------------------        
