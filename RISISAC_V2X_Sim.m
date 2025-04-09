@@ -14,8 +14,8 @@ classdef RISISAC_V2X_Sim < handle
         rate = 0
         c = 3e8;
         lambda = 3e8/28e9;
-        sigma_c_sq_linear = 8.004e-11;
-        sigma_c_sq = 10*log10(8.004e-11); 
+        sigma_c_sq_linear = 10e-6;
+        sigma_c_sq = -60; 
         Pb_dbm = 0;
 
         h_l = 0;
@@ -179,11 +179,14 @@ classdef RISISAC_V2X_Sim < handle
         end
 
         function Pb = getpower(obj)
-            Pb = trace(obj.Wx * obj.Wx') / obj.Ns;
-            obj.Pb = Pb;
+            % Pb = trace(obj.Wx * obj.Wx') / obj.Ns;
+
+            obj.Pb = 1;
             % disp(Pb);
-            obj.Pb_dbm = 10*log10(Pb*1000);
-            % disp(obj.Pb_dbm);
+            obj.Pb_dbm = 30;
+
+            Pb = obj.Pb;
+
         end
 
         function rate = getrate(obj)
@@ -228,6 +231,7 @@ classdef RISISAC_V2X_Sim < handle
             
             % Initialize 3D channel matrix (Nt×Nb×Ns)
             H_bt = zeros(Nt, Nb, obj.Ns);
+
             
             % Calculate H_bt for each subcarrier
             for n = 1:obj.Ns
@@ -827,6 +831,8 @@ classdef RISISAC_V2X_Sim < handle
             obj.peb = sqrt(trace(CRLB));
             obj.peb = real(obj.peb);
             peb = obj.peb;
+            % disp("this is CRLB");
+            % disp(CRLB)
             % disp("this is peb: " + peb);
             % disp("this is J matrix: ");
             % disp(J);
@@ -965,83 +971,14 @@ classdef RISISAC_V2X_Sim < handle
         function [J, J_zao, T] = computeFisherInformationMatrix(obj, Wx ,H_Los_3d, H_NLos_3d)
             % sigma_s = sqrt(obj.Pb/obj.gamma_c);  % Noise variance (placeholder)
             [T] = computeTransformationMatrix(obj);
-            % disp("this is T: ")
+            % disp("this is T")
             % disp(T)
-            % gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
-            % gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
-            
-            % [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, obj.Ns, obj.B, gamma_l, gamma_nl, obj.h_l, obj.h_nl);
-            % [J_zao] = calculateJacobianMatrix(obj, obj.Pb, obj.Ns, Wx, A1, A2, A3, A4);
-            % H_Los_3d = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
-            % H_NLoS_3d = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb);
-            % J_zao = computeJZao(obj, H_Los_3d, H_NLoS_3d);
-
             J_zao = calculate_Jzao(obj, obj.Pb_dbm, obj.Ns, Wx, H_Los_3d, H_NLos_3d);
             % Compute final Fisher Information Matrix
             J = T * J_zao * conj(T');
+            % disp("this is J");
+            % disp(J);
         end
-
-        % function J_zao = computeJZao(obj, H_Los, H_NLoS)
-        %     % Extract parameters from object
-        %     B = obj.B;
-        %     fc = obj.fc;
-        %     c = physconst('LightSpeed');
-        %     N_ant_ris = 64;  % RIS elements
-            
-        %     % Calculate frequency-dependent SNRs
-        %     snr_direct = squeeze(mean(abs(H_Los).^2, [1 2])) / obj.noise_var;  % [Ns×1]
-        %     snr_reflected = squeeze(mean(abs(H_NLoS).^2, [1 2])) / obj.noise_var;
-            
-        %     % Average SNR across subcarriers
-        %     avg_snr_direct = mean(snr_direct);
-        %     avg_snr_reflected = mean(snr_reflected);
-            
-        %     % Calculate parameter variances (CRLB)
-        %     lambda = c/fc;
-        %     var_delay_direct = 1./(8*pi^2 * B^2 * snr_direct);
-        %     var_delay_reflected = 1./(8*pi^2 * B^2 * snr_reflected);
-            
-        %     var_angle_direct = lambda^2./(8*pi^2 * snr_direct * (lambda/2)^2);
-        %     var_angle_reflected = lambda^2./(8*pi^2 * snr_reflected * ((lambda/2)^2 * N_ant_ris));
-            
-        %     % Frequency-average variances
-        %     sigma_sq = [
-        %         mean(var_delay_direct);     % BS-target delay
-        %         mean(var_delay_reflected);  % RIS-target delay
-        %         mean(var_angle_reflected);  % RIS angle 1
-        %         mean(var_angle_reflected);  % RIS angle 2
-        %         mean(var_angle_reflected);  % RIS angle 3
-        %         mean(var_angle_direct);     % BS elevation 1
-        %         mean(var_angle_direct)      % BS elevation 2
-        %     ];
-            
-        %     J_zao = diag(1./sigma_sq);
-        % end
-           
-        
-        function [A1, A2, A3, A4] = computeAmplitudeMatrices(obj, N, B, gamma_l, gamma_nl, h_l, h_nl)
-            [~, ~, ~, ~, ~, ~, delays, ~] = computeGeometricParameters(obj);
-            tau_l = delays.line_of_sight;
-            tau_nl = delays.non_line_of_sight;
-            A1 = zeros(1, N);
-            A2 = zeros(1, N);
-            A3 = zeros(1, N);
-            A4 = zeros(1, N);
-            for n = 1:N
-                % Frequency-dependent scaling factor
-                freq_factor = (n / N);
-                
-                % Compute each amplitude matrix entry
-                A1(n) = gamma_l * h_l * (1j * 2 * pi * B * freq_factor) * ...
-                        exp(1j * 2 * pi * B * freq_factor * tau_l);
-                A2(n) = gamma_nl * h_nl * (1j * 2 * pi * B * freq_factor) * ...
-                        exp(1j * 2 * pi * B * freq_factor * tau_nl);
-                A3(n) = gamma_nl * h_nl * ...
-                        exp(1j * 2 * pi * B * freq_factor * tau_nl);
-                A4(n) = gamma_l * h_l * ...
-                        exp(1j * 2 * pi * B * freq_factor * tau_l);
-            end
-        end 
 
         function [J_zao] = calculate_Jzao(obj, Pb_dbm, N, Wx, H_Los_3d, H_NLos_3d)
             % Initialize Fisher Information Matrix
@@ -1062,15 +999,8 @@ classdef RISISAC_V2X_Sim < handle
             zao = {tau_l, tau_nl, psi_rt, phi_rt_a, phi_rt_e, psi_bt, psi_tb};
             
             % Calculate scaling factor with normalization to prevent numerical issues
-            scaling_factor = (2*Pb_dbm) / obj.sigma_c_sq;
-            % norm_factor = 1e8;  % Adjust this based on your specific value ranges
-            % scaling_factor = scaling_factor / norm_factor;
-            
-            % Log the actual values for debugging
-            % disp(['Original scaling factor: ', num2str(scaling_factor * norm_factor)]);
-            % disp(['Normalized scaling factor: ', num2str(scaling_factor)]);
-            
-            % Rest of the calculation as before
+            scaling_factor = ((2*Pb_dbm) / obj.sigma_c_sq);
+            % disp(scaling_factor);
             for i = 1:7
                 for j = 1:7
                     sum_term = 0;
@@ -1129,190 +1059,68 @@ classdef RISISAC_V2X_Sim < handle
             a_psi_tb = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2);
 
             a_rt = 1j * (2*pi/obj.lambda) * cos(psi_rt) * diag(0:obj.Nt-1);
+            a_bt = 1j * (2*pi/obj.lambda) * cos(psi_bt) * diag(0:obj.Nt-1);
+            a_tb = 1j * (2*pi/obj.lambda) * cos(psi_tb) * diag(0:obj.Nt-1);
+
+            gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
+            gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
+
             freq_factor = (subcarrier_idx / N);
+
             if param_idx <= 2
                 % Time domain derivative (frequency domain multiplication)
                 % omega_n = 2*pi*subcarrier_idx; % Angular frequency
                 if param_idx == 1 % LoS delay
                     dmu = gamma_l * obj.h_l * (1j * 2 * pi * obj.B * freq_factor) * ...
                         exp(1j * 2 * pi * obj.B * freq_factor * tau_l) * ...
-                        a_psi_bt * conj(a_psi_tb') * Wx(:,subcarrier_idx);
+                        a_psi_bt(:,subcarrier_idx) * conj(a_psi_tb(:,subcarrier_idx)') * Wx(:,subcarrier_idx);
 
                 else % NLoS delay
                     dmu = gamma_nl * obj.h_nl * (1j * 2 * pi * obj.B * freq_factor) * ...
                         exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
-                        a_psi_rt * conj(a_phi_art') * obj.phi * a_phi_abr * conj(a_psi_br') *...
+                        a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * obj.phi * a_phi_abr(:,subcarrier_idx) * conj(a_psi_br(:,subcarrier_idx)') *...
                         Wx(:, subcarrier_idx);
                 end
             % For angle parameters (param_idx 3-7)
             else
-                % Calculate based on specific angle parameter
-                % This would depend on your channel model
-                % Example for simplicity (needs to be replaced with actual model):
-                param_value = zao_params{param_idx};
+                a_rt_a = 1j * (2 * pi / obj.lambda) * (obj.lambda/2) * ((obj.Nx - 1) * cos(phi_art) * sin(phi_ert));
+                a_rt_e = 1j * (2 * pi / obj.lambda) * (obj.lambda/2) * ((obj.Nx - 1) * sin(phi_art) * cos(phi_ert) - (obj.Ny - 1) * sin(phi_ert));
                 
                 % Different derivatives for different angle parameters
                 % (This is a placeholder - actual calculations would be model-specific)
                 if param_idx == 3 % psi_rt
                     dmu = gamma_nl * obj.h_nl * ...
                         exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
-                        a_rt * a_psi_rt * conj(a_phi_art') * 
+                        a_rt * a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * obj.phi * ...
+                        a_phi_abr(:,subcarrier_idx) * conj(a_psi_br(:,subcarrier_idx)') * Wx(:, subcarrier_idx);
                 elseif param_idx == 4 % phi_rt_a
-                    dmu = mu * (-1j) * sin(param_value);
+                    dmu = gamma_nl * obj.h_nl * ...
+                        exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
+                        a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * diag(a_rt_a) * obj.phi * ...
+                        a_phi_abr(:,subcarrier_idx) * conj(a_psi_br(:,subcarrier_idx)') * Wx(:, subcarrier_idx);
                 elseif param_idx == 5 % phi_rt_e
-                    dmu = mu * (-1j) * sin(param_value);
+                    dmu = gamma_nl * obj.h_nl * ...
+                        exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
+                        a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * diag(a_rt_e) * obj.phi * a_phi_abr(:,subcarrier_idx) * ...
+                        conj(a_psi_br(:,subcarrier_idx)')*Wx(:,subcarrier_idx);
                 elseif param_idx == 6 % psi_bt
-                    dmu = mu * (-1j) * cos(param_value);
+                    dmu = gamma_l * obj.h_l * exp(1j * 2 * pi * obj.B * freq_factor * tau_l) * ...
+                        a_psi_tb(:,subcarrier_idx) * ...
+                        conj(a_psi_bt(:,subcarrier_idx)') * ...
+                        a_bt * ...
+                        a_psi_bt(:,subcarrier_idx) * ...
+                        (a_psi_bt(:,subcarrier_idx)' * Wx(:, subcarrier_idx));
+
                 else % psi_tb
-                    dmu = mu * (-1j) * cos(param_value);
+                    dmu = gamma_l * obj.h_l * exp(1j * 2 * pi * obj.B * freq_factor * tau_l) * ...
+                        a_psi_tb(:,subcarrier_idx) * ...
+                        conj(a_psi_bt(:,subcarrier_idx)') * ...
+                        a_tb * ...
+                        a_psi_tb(:,subcarrier_idx) * ...
+                        (a_psi_tb(:,subcarrier_idx)' * Wx(:, subcarrier_idx));                  
                 end
             end
         end
-
-        % function deriv = calculate_derivative(mu, zao, param_index, n, H_Los_3d, H_NLos_3d, Wx)
-        %     % For calculating derivatives with respect to each parameter in zao
-        %     % without modifying H_NLos which is already updated in the main loop
-            
-        %     delta = 1e-6;  % Small perturbation
-            
-        %     % Create perturbed version of parameter
-        %     zao_perturbed = zao;
-        %     zao_perturbed(param_index) = zao_perturbed(param_index) + delta;
-            
-        %     % Calculate how mu would change if only this parameter changed
-        %     % This depends on how each parameter in zao affects the observation
-            
-        %     if param_index == 1  % Example for first parameter
-        %         % Calculate how mu would change based on this parameter
-        %         % This is parameter-specific and depends on your model
-        %         mu_perturbed = calculate_mu_for_perturbed_param(zao_perturbed, param_index, H_Los_3d(:,:,n), H_NLos_3d(:,:,n), Wx(:,n));
-        %     elseif param_index == 2
-        %         % Handle second parameter
-        %         mu_perturbed = calculate_mu_for_perturbed_param(zao_perturbed, param_index, H_Los_3d(:,:,n), H_NLos_3d(:,:,n), Wx(:,n));
-        %     % ... and so on for each parameter
-        %     end
-            
-        %     % Calculate derivative using finite difference
-        %     deriv = (mu_perturbed - mu) / delta;
-        % end
-
-        % function [J_zao] = calculateJacobianMatrix(obj, Pb, N, Wx, A1, A2, A3, A4)
-        %     % TODO: Initialize 7x7 Jacobian matrix
-        %     J_zao = zeros(7, 7);
-        %     [~, ~, ~, ~, ~, ~, ~, angles] = computeGeometricParameters(obj);
-        %     psi_rt = angles.ris_to_target.aoa;
-        %     psi_bt = angles.bs_to_target_transmit;
-        %     psi_tb = angles.bs_to_target_receive;
-        %     psi_br = angles.bs_to_ris.azimuth;
-        %     phi_rt_a = angles.ris_to_target.azimuth;
-        %     phi_rt_e = angles.ris_to_target.elevation_angle;
-        %     phi_br_a = angles.bs_to_ris.elevation_azimuth;
-        %     phi_br_e = angles.bs_to_ris.elevation_angle;
-
-        %     % Initialize a_rt with proper dimensions
-        %     % Initialize a_rt, a_bt, and a_tb with proper dimensions
-        %     a_rt = zeros(obj.Nt, obj.Ns);
-        %     a_bt = zeros(obj.Nb, obj.Ns);
-        %     a_tb = zeros(obj.Nt, obj.Ns);
-
-        %     % Calculate for each subcarrier
-        %     for n = 1:obj.Ns
-        %         % For a_rt - we need a column vector, not a diagonal matrix
-        %         indices = (0:(obj.Nt-1))';  % Column vector of indices
-        %         a_rt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_rt) * indices;
-                
-        %         % For a_bt
-        %         indices_b = (0:(obj.Nb-1))';
-        %         a_bt(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_bt) * indices_b;
-                
-        %         % For a_tb
-        %         a_tb(:,n) = 1j * (2 * pi / obj.lambda) * cos(psi_tb) * indices;
-        %     end
-
-        %     % Initialize arrays for a_rt_a and a_rt_e
-        %     a_rt_a = zeros(obj.Nr, obj.Ns);
-        %     a_rt_e = zeros(obj.Nr, obj.Ns);
-
-        %     % Calculate a_rt_a and a_rt_e for each subcarrier
-        %     for n = 1:obj.Ns
-        %         a_rt_a(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * ((obj.Nx-1) * cos(phi_rt_a) * sin(phi_rt_e));
-        %         a_rt_e(:, n) = 1j * (2 * pi / obj.lambda) * obj.lambda/2 * (((obj.Nx-1) * sin(phi_rt_a) * cos(phi_rt_e)) - ((obj.Ny-1) * sin(phi_rt_e)));
-        %     end
-
-        %     % TODO: implement all the a vector
-        %     a_vec = compute_a_psi(obj, obj.Nt, psi_bt, obj.lambda, obj.lambda/2);
-        %     a_psi_bt = a_vec;
-        %     a_vec = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2);
-        %     a_psi_tb = a_vec;
-        %     a_vec = compute_a_psi(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2);
-        %     a_psi_rt = a_vec;
-        %     a_vec = compute_a_psi(obj, obj.Nb, psi_br, obj.lambda, obj.lambda/2);
-        %     a_psi_br = a_vec;
-
-
-        %     % TODO: implement all the steering vector
-        %     a_phi_br = compute_a_phi(obj, obj.Nx, phi_br_a, phi_br_e, obj.lambda, obj.lambda/2);
-        %     a_phi_rt = compute_a_phi(obj, obj.Nx, phi_rt_a, phi_rt_e, obj.lambda, obj.lambda/2);
-
-        %     for n = 1:N
-        %         % Calculate all partial derivatives
-        %         d_mu_array = cell(7, 1);
-                
-        %         % Extract the nth column from each steering vector matrix
-        %         a_psi_bt_n = a_psi_bt(:,n);
-        %         a_psi_tb_n = a_psi_tb(:,n);
-        %         a_psi_rt_n = a_psi_rt(:,n);
-        %         a_psi_br_n = a_psi_br(:,n);
-        %         a_phi_rt_n = a_phi_rt(:,n);
-        %         a_phi_br_n = a_phi_br(:,n);
-                
-        %         % Extract the nth element from amplitude matrices
-        %         A1_n = A1(n);
-        %         A2_n = A2(n);
-        %         A3_n = A3(n);
-        %         A4_n = A4(n);
-                
-        %         % Partial derivatives with respect to each parameter
-        %         % d_mu_d_tau_l
-        %         d_mu_array{1} = (A1_n * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
-                
-        %         % d_mu_d_tau_nl
-        %         d_mu_array{2} = (A2_n * a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
-                
-        %         d_mu_array{3} = A3_n * (a_rt(:,n) .* a_psi_rt_n) * (a_phi_rt_n' * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
-
-        %         % d_mu_d_phi_rt_a
-        %         d_mu_array{4} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_a(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
-                
-        %         % d_mu_d_phi_rt_e
-        %         d_mu_array{5} = (A3_n * a_psi_rt_n) * (a_phi_rt_n' * diag(a_rt_e(:,n)) * obj.phi * a_phi_br_n) * (a_psi_br_n' * Wx(:,n));
-                
-        %         % d_mu_d_psi_br
-        %         d_mu_array{6} = (A4_n * a_bt(:,n)' * a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
-                
-        %         d_mu_array{7} = A4_n * (a_tb(:,n) .* a_psi_bt_n) * (a_psi_tb_n' * Wx(:,n));
-
-        %         % Calculate Jacobian matrix elements
-        %         for i = 1:7
-        %             for j = 1:7
-        %                 % Get the sizes of the current derivatives
-        %                 [rows_i, cols_i] = size(d_mu_array{i});
-        %                 [rows_j, cols_j] = size(d_mu_array{j});
-                        
-        %                 % Compute the FIM entry based on dimensions
-        %                 if rows_i == rows_j && cols_i == cols_j
-        %                     % If dimensions match, use dot product
-        %                     J_zao(i,j) = J_zao(i,j) +  (2*obj.Pb/obj.sigma_c_sq)*real(sum(sum(conj(d_mu_array{i}) .* d_mu_array{j})));
-        %                 else
-        %                     J_zao(i,j) = J_zao(i,j) +  (2*obj.Pb/obj.sigma_c_sq)*real(sum(sum(d_mu_array{i} * d_mu_array{j}')));
-        %                 end
-        %             end
-        %         end                
-        %     end
-        %     obj.Jzao = J_zao;
-        %     disp("this is Jzao matrix: ");
-        %     disp(J_zao);
-        % end                         
         % ! -------------------- PEB COMPUTATION PART ENDS HERE --------------------        
 
     end
