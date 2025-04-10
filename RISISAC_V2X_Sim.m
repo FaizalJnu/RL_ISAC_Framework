@@ -447,7 +447,6 @@ classdef RISISAC_V2X_Sim < handle
             obj.trajectory = [obj.trajectory; obj.car_loc];
         end        
         
-
         function [next_state, reward, peb, rate, power, done] = step(obj, action)
             % Update RIS phases based on action
             ris_phases = action(1:obj.Nr);
@@ -455,7 +454,7 @@ classdef RISISAC_V2X_Sim < handle
             [H_Los, H_Los_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
             [H_NLos, H_NLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb, obj.phi);
             obj.H_combined = compute_Heff(obj, H_Los, H_NLos);
-            [obj.Wx,obj.W] = computeWx(obj);
+            [obj.Wx, obj.W] = computeWx(obj);
             power = getpower(obj);
             obj.Pb = power;
             power = obj.Pb_dbm;
@@ -464,51 +463,108 @@ classdef RISISAC_V2X_Sim < handle
             obj.rate = rate;
             peb = obj.calculatePerformanceMetrics(obj.Wx, H_Los_3d, H_NLos_3d);
             obj.peb = peb;
-            % Calculate performance metrics
-            reward = obj.computeReward(peb);
-            reward = abs(reward); % Ensure reward is a real-valued scalar
             
-            % Initialize properties only once per episode
+            % Compute reward
+            reward = abs(obj.computeReward(peb));
+        
+            % Initialize position once per episode
             persistent isInitialized;
             if isempty(isInitialized) || obj.stepCount == 0
                 isInitialized = true;
-                obj.center = [250, 500, 0]; % Center of circular path
-                obj.radius = 250; % Radius of circular path in meters
-                obj.angular_speed = 0.08; % Angular speed in radians per second
-                obj.angle = 0; % Initial angle
-                % Force car to start at a position on the circle
-                obj.car_loc = obj.center + [obj.radius, 0, 0];
-                obj.car_orientation = pi/2; % Start with orientation tangent to circle
+                obj.car_loc = [500, 500, 0]; % Start position
+                obj.car_orientation = 0;     % Facing along positive x-axis
+                obj.stepCount = 0;
             end
-            
-            % Update angle for circular motion
-            obj.angle = obj.angle + obj.angular_speed * obj.dt;
-            
-            % Calculate new position on the circle
-            new_x = obj.center(1) + obj.radius * cos(obj.angle);
-            new_y = obj.center(2) + obj.radius * sin(obj.angle);
-            obj.car_loc = [new_x, new_y, 0];
-            
-            % Update car orientation to be tangent to the circle
-            obj.car_orientation = obj.angle + pi/2;
-            
+        
+            % Move car linearly along x-axis by 0.05 meters per step
+            obj.car_loc(1) = obj.car_loc(1) + 0.05;
+        
+            % Keep y and z fixed (assuming flat ground at y = 500, z = 0)
+            obj.car_loc(2) = 500;
+            obj.car_loc(3) = 0;
+        
+            % Update orientation (still facing x-direction)
+            obj.car_orientation = 0;
+        
             % Update target location to match car location
             obj.target_loc = obj.car_loc;
-            
+        
             % Update time and step count
             obj.time = obj.time + obj.dt;
             obj.stepCount = obj.stepCount + 1;
-            
+        
             % Update trajectory and visualization
             obj.updateTrajectory();
             obj.updateVisualization();
-            
+        
             % Check if episode is done
             done = obj.stepCount >= obj.maxSteps;
-            
+        
             % Retrieve the next state
             next_state = getState(obj);
-        end
+        end        
+
+        % function [next_state, reward, peb, rate, power, done] = step(obj, action)
+        %     % Update RIS phases based on action
+        %     ris_phases = action(1:obj.Nr);
+        %     obj.phi = diag(exp(1j * 2 * pi * ris_phases));
+        %     [H_Los, H_Los_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
+        %     [H_NLos, H_NLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb, obj.phi);
+        %     obj.H_combined = compute_Heff(obj, H_Los, H_NLos);
+        %     [obj.Wx,obj.W] = computeWx(obj);
+        %     power = getpower(obj);
+        %     obj.Pb = power;
+        %     power = obj.Pb_dbm;
+        %     obj.gamma_c = computeSNR(obj);
+        %     rate = getrate(obj);
+        %     obj.rate = rate;
+        %     peb = obj.calculatePerformanceMetrics(obj.Wx, H_Los_3d, H_NLos_3d);
+        %     obj.peb = peb;
+        %     % Calculate performance metrics
+        %     reward = obj.computeReward(peb);
+        %     reward = abs(reward); % Ensure reward is a real-valued scalar
+            
+        %     % Initialize properties only once per episode
+        %     persistent isInitialized;
+        %     if isempty(isInitialized) || obj.stepCount == 0
+        %         isInitialized = true;
+        %         obj.center = [250, 500, 0]; % Center of circular path
+        %         obj.radius = 250; % Radius of circular path in meters
+        %         obj.angular_speed = 0.08; % Angular speed in radians per second
+        %         obj.angle = 0; % Initial angle
+        %         % Force car to start at a position on the circle
+        %         obj.car_loc = obj.center + [obj.radius, 0, 0];
+        %         obj.car_orientation = pi/2; % Start with orientation tangent to circle
+        %     end
+            
+        %     % Update angle for circular motion
+        %     obj.angle = obj.angle + obj.angular_speed * obj.dt;
+            
+        %     % Calculate new position on the circle
+        %     new_x = obj.center(1) + obj.radius * cos(obj.angle);
+        %     new_y = obj.center(2) + obj.radius * sin(obj.angle);
+        %     obj.car_loc = [new_x, new_y, 0];
+            
+        %     % Update car orientation to be tangent to the circle
+        %     obj.car_orientation = obj.angle + pi/2;
+            
+        %     % Update target location to match car location
+        %     obj.target_loc = obj.car_loc;
+            
+        %     % Update time and step count
+        %     obj.time = obj.time + obj.dt;
+        %     obj.stepCount = obj.stepCount + 1;
+            
+        %     % Update trajectory and visualization
+        %     obj.updateTrajectory();
+        %     obj.updateVisualization();
+            
+        %     % Check if episode is done
+        %     done = obj.stepCount >= obj.maxSteps;
+            
+        %     % Retrieve the next state
+        %     next_state = getState(obj);
+        % end
                 
 
         % function [next_state, reward, peb, rate, power, done] = step(obj, action)
