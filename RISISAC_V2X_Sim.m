@@ -1032,6 +1032,7 @@ classdef RISISAC_V2X_Sim < handle
             J_zao = calculate_Jzao(obj, obj.Pb_dbm, obj.Ns, Wx, H_Los_3d, H_NLos_3d);
             % Compute final Fisher Information Matrix
             J = T * J_zao * conj(T');
+            disp(J)
             % disp("this is J");
             % disp(J);
         end
@@ -1197,7 +1198,7 @@ classdef RISISAC_V2X_Sim < handle
             zao = {tau_l, tau_nl, psi_rt, phi_rt_a, phi_rt_e, psi_bt, psi_tb};
             
             % Calculate scaling factor with normalization to prevent numerical issues
-            scaling_factor = (2*Pb_dbm) / obj.sigma_c_sq;
+            scaling_factor = -1;
             
             % Precompute all derivatives for all parameters and subcarriers
             derivatives = cell(7, N);
@@ -1226,6 +1227,7 @@ classdef RISISAC_V2X_Sim < handle
                     J_zao(j,i) = J_zao(i,j);  % Use symmetry property
                 end
             end
+            % disp(J_zao);
         end
         
         function dmu = calculate_derivative(obj, mu, zao_params, param_idx, subcarrier_idx, H_Los, H_NLos, Wx)
