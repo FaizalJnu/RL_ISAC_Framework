@@ -5,6 +5,7 @@ import torch
 import matplotlib.pyplot as plt
 import os
 import time
+from drlisac import DDPGagent
 
 class RISISACTrainer:
     def __init__(self):
@@ -27,18 +28,32 @@ class RISISACTrainer:
         print(f"Initializing FLDDPG with state_dim={state_dim}, action_dim={action_dim}")
         
         # Initialize DDPG agent with improved parameters
-        self.agent = FLDDPG(
-            state_dim=state_dim,
-            action_dim=action_dim,
-            hidden_dims=[400, 300],
-            buffer_size=10000,  # 𝒟 = 10000
-            batch_size=16,  # 𝑇ₘₐₓ = 16
-            gamma=0.95,  # γ_b = 0.95
-            tau=0.00001,  # τ_tc and τ_ta = 0.00001
-            actor_lr=0.001,  # μ_ta = 0.001
-            critic_lr=0.001,  # μ_tc = 0.001
-            lr_decay_rate=0.00001,  # λ_tc and λ_ta = 0.00001
-            min_lr=1e-6,  # Not explicitly in the table, but might be useful
+        # self.agent = FLDDPG(
+        #     state_dim=state_dim,
+        #     action_dim=action_dim,
+        #     hidden_dims=[400, 300],
+        #     buffer_size=10000,  # 𝒟 = 10000
+        #     batch_size=16,  # 𝑇ₘₐₓ = 16
+        #     gamma=0.95,  # γ_b = 0.95
+        #     tau=0.00001,  # τ_tc and τ_ta = 0.00001
+        #     actor_lr=0.001,  # μ_ta = 0.001
+        #     critic_lr=0.001,  # μ_tc = 0.001
+        #     lr_decay_rate=0.00001,  # λ_tc and λ_ta = 0.00001
+        #     min_lr=1e-6,  # Not explicitly in the table, but might be useful
+        # )
+        
+        self.agent = DDPGagent(
+            num_states= state_dim,
+            num_actions= action_dim,
+            hidden_size_1= 400,
+            hidden_size_2= 300,
+            max_memory_size= 10000,
+            disc_fact= 0.95,
+            tau= 0.00001,
+            actor_learning_rate= 0.001,
+            critic_learning_rate= 0.001,
+            lr_decay= 0.00001,
+            min_lr= 1e-6
         )
 
         
@@ -77,8 +92,8 @@ class RISISACTrainer:
         
         checkpoint = {
             'episode': episode,
-            'actor_state_dict': self.agent.actor.state_dict(),
-            'critic_state_dict': self.agent.critic.state_dict(),
+            'actor_state_dict': self.agent.actor_eval.state_dict(),
+            'critic_state_dict': self.agent.critic_eval.state_dict(),
             'actor_optimizer': self.agent.actor_optimizer.state_dict(),
             'critic_optimizer': self.agent.critic_optimizer.state_dict(),
             'metrics': metrics
@@ -161,8 +176,8 @@ class RISISACTrainer:
             # Initialize episode precoder
             step_counter = 0
 
-            if(episode!=0):
-                self.agent.decay_learning_rates()
+            # if(episode!=0):
+            #     self.agent.decay_learning_rates()
 
             
             for step in range(max_steps):
@@ -199,8 +214,8 @@ class RISISACTrainer:
                 done = bool(done)
                 
                 # Store transition and update networks
-                self.agent.replay_buffer.push(state, action, reward, next_state, done)
-                actor_loss, critic_loss = self.agent.update()
+                self.agent.replay_buffer.push(state, action, reward, next_state)
+                actor_loss, critic_loss = self.agent.update(16)
                 
                 # Track step metrics
                 episode_reward += reward
@@ -253,7 +268,7 @@ class RISISACTrainer:
             if episode_losses['actor']:
                 self.metrics['actor_losses'].append(np.mean(episode_losses['actor']))
                 self.metrics['critic_losses'].append(np.mean(episode_losses['critic']))
-            self.metrics['learning_rates'].append(self.agent.current_actor_lr)
+            # self.metrics['learning_rates'].append(self.agent.current_actor_lr)
             
             # Update best metrics and save checkpoints
             if episode_reward > self.best_metrics['reward']:
@@ -278,7 +293,7 @@ class RISISACTrainer:
                 print(f"Avg PEB: {avg_peb_in_episode:.6f}")
                 print(f"Last PEB: {last_peb_in_episode:.6f}")
                 print(f"Best PEB (all episodes): {self.best_metrics['peb']:.6f}")
-                print(f"Learning Rate: {self.agent.get_current_actor_lr():.12f}")
+                # print(f"Learning Rate: {self.agent.get_current_actor_lr():.12f}")
                 print(f"Buffer Size: {len(self.agent.replay_buffer)}")
                 print("-" * 50)
             
