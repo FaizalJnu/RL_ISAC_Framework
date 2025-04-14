@@ -5,7 +5,7 @@ import torch
 import matplotlib.pyplot as plt
 import os
 import time
-from drlisac import DDPGagent
+# from drlisac import DDPGagent
 
 class RISISACTrainer:
     def __init__(self):
@@ -162,10 +162,12 @@ class RISISACTrainer:
         exp = 0
         unexp = 0
         exp_unexp_ration = []
+        # first_phi_val = []
         for episode in range(num_episodes):
             episode_start_time = time.time()
             # Reset environment
             matlab_state = self.eng.reset(self.sim)
+            # first_phi_val.append(self.eng.initializephi())
             state = self.process_state(matlab_state)
             episode_reward = 0
             episode_losses = {'actor': [], 'critic': []}
@@ -237,6 +239,7 @@ class RISISACTrainer:
 
             episode_time = time.time() - episode_start_time
             print(f"Episode {episode+1} completed in {episode_time:.2f} seconds")
+            # np.savetext('phi_Vals', first_phi_val, fmt='%f')
             
             # Calculate average PEB for the episode
             avg_peb_in_episode = sum(peb_values_in_episode) / len(peb_values_in_episode)

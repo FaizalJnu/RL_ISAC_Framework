@@ -126,10 +126,10 @@ classdef RISISAC_V2X_Sim < handle
         function obj = RISISAC_V2X_Sim()
             % Initialize channels
             obj.initializeChannels();
+            obj.initializeVisualization();
             obj.initializephi();
             obj.calculate_pathloss();
             % obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
-            obj.initializeVisualization();
             % obj.destination = [999, 999, 0];
             [H_Los,H_Los_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
             [H_NLos,H_NLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb, obj.phi);
@@ -208,6 +208,7 @@ classdef RISISAC_V2X_Sim < handle
             theta = A(randi(numel(A), obj.Nr, 1));
             u = rho_r * exp(1j*theta);
             obj.phi = diag(u); 
+            % disp(obj.phi);
         end
 
         
@@ -449,8 +450,15 @@ classdef RISISAC_V2X_Sim < handle
         
         function [next_state, reward, peb, rate, power, done] = step(obj, action)
             % Update RIS phases based on action
-            ris_phases = action(1:obj.Nr);
-            obj.phi = diag(exp(1j * 2 * pi * ris_phases));
+            ris_phases = action(1:obj.Nr);  % values in [0, 1)
+            u = exp(1j * 2 * pi * ris_phases);  % convert to complex values on unit circle
+            obj.phi = diag(u);  % assign to diagonal
+            % fileID = fopen('phi_values.txt','w');
+            % for i = 1:obj.Nr
+            %     fprintf(fileID, '%f + %fj\n', real(u(i)), imag(u(i)));
+            % end
+            % fclose(fileID);
+            % disp(obj.phi);
             [H_Los, H_Los_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
             [H_NLos, H_NLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb, obj.phi);
             obj.H_combined = compute_Heff(obj, H_Los, H_NLos);
@@ -462,6 +470,8 @@ classdef RISISAC_V2X_Sim < handle
             rate = getrate(obj);
             obj.rate = rate;
             peb = obj.calculatePerformanceMetrics(obj.Wx, H_Los_3d, H_NLos_3d);
+            disp("step" + obj.stepCount);
+            disp("peb" + peb);
             obj.peb = peb;
             
             % Compute reward
@@ -906,16 +916,16 @@ classdef RISISAC_V2X_Sim < handle
             T(1,3) = (zr*(xt-xr)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
             T(1,4) = ((yr-yt)*(xr-xt)) / ((L2^3)*sqrt(1-((yr-yt)^2)/(L2)^2));
             T(1,5) = (zr*(xr-xt)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
-            T(1,6) = (zb*(xt-xb)) / ((L3^3)*sqrt(1-L3^2));
-            T(1,7) = (zb*(xt-xb)) / ((L3^3)*sqrt(1-L3^2));
+            T(1,6) = (zb*(xt-xb)) / ((L3^3)*sqrt(1-(zb/L3)^2));
+            T(1,7) = (zb*(xt-xb)) / ((L3^3)*sqrt(1-(zb/L3)^2));
             
             T(2,1) = (yt-yb) / (obj.c*L3);
             T(2,2) = (yt-yr) / (obj.c*L2);
             T(2,3) = (zr*(yt-yr)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
             T(2,4) = ((L_proj2^2) + (yr-yt)*(xr-xt)) / ((L2^3)*sqrt(1-((yr-yt)^2)/(L2)^2));
             T(2,5) = (zr*(yr-yt)) / ((L2^3)*sqrt(1-((zr)^2)/(L2)^2));
-            T(2,6) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
-            T(2,7) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-L3^2));
+            T(2,6) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-(zb/L3)^2));
+            T(2,7) = (zb*(yt-yb)) / ((L3^3)*sqrt(1-(zb/L3)^2));
         end
 
         % function [T] = computeTransformationMatrix(obj)
@@ -1019,15 +1029,16 @@ classdef RISISAC_V2X_Sim < handle
         % end        
         
         function [J, J_zao, T] = computeFisherInformationMatrix(obj, Wx ,H_Los_3d, H_NLos_3d)
-            % sigma_s = sqrt(obj.Pb/obj.gamma_c);  % Noise variance (placeholder)
+            % sigma_s = sqrt(obj.Pb/obj.gamma_c); 
+            format long g; % Noise variance (placeholder)
             [T] = computeTransformationMatrix(obj);
             % disp("this is T")
             % disp(T)
             J_zao = calculate_Jzao(obj, obj.Pb_dbm, obj.Ns, Wx, H_Los_3d, H_NLos_3d);
             % disp(J_zao);
+            % disp(J_zao);
             % Compute final Fisher Information Matrix
             J = T * J_zao * conj(T');
-            % disp(J);
             % disp("this is J");
             % disp(J);
         end
@@ -1051,7 +1062,7 @@ classdef RISISAC_V2X_Sim < handle
             zao = {tau_l, tau_nl, psi_rt, phi_rt_a, phi_rt_e, psi_bt, psi_tb};
             
             % Calculate scaling factor with normalization to prevent numerical issues
-            scaling_factor = ((2*Pb_dbm) / obj.sigma_c_sq);
+            scaling_factor = 10e6;
             % disp(scaling_factor);
             for i = 1:7
                 for j = 1:7
