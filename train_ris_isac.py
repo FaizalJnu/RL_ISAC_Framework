@@ -28,33 +28,33 @@ class RISISACTrainer:
         print(f"Initializing FLDDPG with state_dim={state_dim}, action_dim={action_dim}")
         
         # Initialize DDPG agent with improved parameters
-        # self.agent = FLDDPG(
-        #     state_dim=state_dim,
-        #     action_dim=action_dim,
-        #     hidden_dims=[400, 300],
-        #     buffer_size=10000,  # 𝒟 = 10000
-        #     batch_size=16,  # 𝑇ₘₐₓ = 16
-        #     gamma=0.95,  # γ_b = 0.95
-        #     tau=0.00001,  # τ_tc and τ_ta = 0.00001
-        #     actor_lr=0.001,  # μ_ta = 0.001
-        #     critic_lr=0.001,  # μ_tc = 0.001
-        #     lr_decay_rate=0.00001,  # λ_tc and λ_ta = 0.00001
-        #     min_lr=1e-6,  # Not explicitly in the table, but might be useful
-        # )
-        
-        self.agent = DDPGagent(
-            num_states= state_dim,
-            num_actions= action_dim,
-            hidden_size_1= 400,
-            hidden_size_2= 300,
-            max_memory_size= 10000,
-            disc_fact= 0.95,
-            tau= 0.00001,
-            actor_learning_rate= 0.001,
-            critic_learning_rate= 0.001,
-            lr_decay= 0.00001,
-            min_lr= 1e-6
+        self.agent = FLDDPG(
+            state_dim=state_dim,
+            action_dim=action_dim,
+            hidden_dims=[512, 256],
+            buffer_size=10000,  # 𝒟 = 10000
+            batch_size=16,  # 𝑇ₘₐₓ = 16
+            gamma=0.95,  # γ_b = 0.95
+            tau=0.00001,  # τ_tc and τ_ta = 0.00001
+            actor_lr=0.001,  # μ_ta = 0.001
+            critic_lr=0.001,  # μ_tc = 0.001
+            lr_decay_rate=0.00001,  # λ_tc and λ_ta = 0.00001
+            min_lr=1e-6,  # Not explicitly in the table, but might be useful
         )
+        
+        # self.agent = DDPGagent(
+        #     num_states= state_dim,
+        #     num_actions= action_dim,
+        #     hidden_size_1= 400,
+        #     hidden_size_2= 300,
+        #     max_memory_size= 10000,
+        #     disc_fact= 0.95,
+        #     tau= 0.00001,
+        #     actor_learning_rate= 0.001,
+        #     critic_learning_rate= 0.001,
+        #     lr_decay= 0.00001,
+        #     min_lr= 1e-6
+        # )
 
         
         # Initialize metrics tracking
@@ -159,6 +159,9 @@ class RISISACTrainer:
         rate_values = [[] for _ in range(300)]
         power_values = [[] for _ in range(300)]
         avg_power = []
+        exp = 0
+        unexp = 0
+        exp_unexp_ration = []
         for episode in range(num_episodes):
             episode_start_time = time.time()
             # Reset environment
@@ -176,8 +179,8 @@ class RISISACTrainer:
             # Initialize episode precoder
             step_counter = 0
 
-            # if(episode!=0):
-            #     self.agent.decay_learning_rates()
+            if(episode!=0):
+                self.agent.decay_learning_rates()
 
             
             for step in range(max_steps):
@@ -185,8 +188,10 @@ class RISISACTrainer:
                 value = np.random.uniform(0,1)
                 if (value < epsilon_start):
                     explore = True
+                    exp+=1
                 else:
                     explore = False
+                    unexp+=1
                 # explore = False
 
                 step_counter = step_counter + 1
@@ -214,8 +219,8 @@ class RISISACTrainer:
                 done = bool(done)
                 
                 # Store transition and update networks
-                self.agent.replay_buffer.push(state, action, reward, next_state)
-                actor_loss, critic_loss = self.agent.update(16)
+                self.agent.replay_buffer.push(state, action, reward, next_state, done)
+                actor_loss, critic_loss = self.agent.update()
                 
                 # Track step metrics
                 episode_reward += reward
@@ -238,7 +243,8 @@ class RISISACTrainer:
             last_peb_in_episode = current_peb
             avg_rate = np.mean(rate_values[episode])
             avg_power = np.mean(power_values[episode])
-            
+            exp_unexp_ration.append(exp/unexp)
+
             # Normalize reward
             episode_reward = episode_reward/step_counter
 
@@ -252,7 +258,8 @@ class RISISACTrainer:
                     'avg_peb_values': [],
                     'last_peb_values': [],
                     'avg_rate': [],
-                    'avg_power': []
+                    'avg_power': [],
+                    'exp_unexp_ratio': []
                 })
             
             self.metrics['initial_peb_values'].append(initial_peb)
@@ -263,12 +270,12 @@ class RISISACTrainer:
             self.metrics['episode_rewards'].append(episode_reward)
             self.metrics['avg_rate'].append(avg_rate)
             self.metrics['avg_power'].append(avg_power)
-
+            self.metrics['exp_unexp_ratio'].append(exp/unexp)
             self.metrics['peb_values'].append(current_peb)  # For backward compatibility
             if episode_losses['actor']:
                 self.metrics['actor_losses'].append(np.mean(episode_losses['actor']))
                 self.metrics['critic_losses'].append(np.mean(episode_losses['critic']))
-            # self.metrics['learning_rates'].append(self.agent.current_actor_lr)
+            self.metrics['learning_rates'].append(self.agent.current_actor_lr)
             
             # Update best metrics and save checkpoints
             if episode_reward > self.best_metrics['reward']:
@@ -293,7 +300,7 @@ class RISISACTrainer:
                 print(f"Avg PEB: {avg_peb_in_episode:.6f}")
                 print(f"Last PEB: {last_peb_in_episode:.6f}")
                 print(f"Best PEB (all episodes): {self.best_metrics['peb']:.6f}")
-                # print(f"Learning Rate: {self.agent.get_current_actor_lr():.12f}")
+                print(f"Learning Rate: {self.agent.get_current_actor_lr():.12f}")
                 print(f"Buffer Size: {len(self.agent.replay_buffer)}")
                 print("-" * 50)
             
@@ -408,12 +415,12 @@ if __name__ == "__main__":
     plt.grid(True)
     plt.savefig(os.path.join(plt_folder,'power_per_episode'))
 
-    # plt.figure(figsize=(10,5))
-    # plt.plot(episodes, metrics['best_peb'])
-    # plt.title('Best PEB per episode')
-    # plt.xlabel('Episode')
-    # plt.ylabel('PEB')
-    # plt.grid(True)
-    # plt.savefig(os.path.join(plt_folder,'best_peb_per_episode'))
-    # plt.show()
+    plt.figure(figsize=(10,5))
+    plt.plot(episodes, metrics['exp_unexp_ratio'])
+    plt.title('exp and exploit ratio')
+    plt.xlabel('Episode')
+    plt.ylabel('ratio')
+    plt.grid(True)
+    plt.savefig(os.path.join(plt_folder,'exp_exploit_ratio'))
+    plt.show()
     trainer.close()

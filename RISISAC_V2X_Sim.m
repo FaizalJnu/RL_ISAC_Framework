@@ -128,7 +128,7 @@ classdef RISISAC_V2X_Sim < handle
             obj.initializeChannels();
             obj.initializephi();
             obj.calculate_pathloss();
-            obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
+            % obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
             obj.initializeVisualization();
             % obj.destination = [999, 999, 0];
             [H_Los,H_Los_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
@@ -761,9 +761,6 @@ classdef RISISAC_V2X_Sim < handle
             obj.initializeChannels();
             obj.initializephi();
             obj.calculate_pathloss();
-            % obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
-            % obj.initializeVisualization();
-            % obj.destination = [999, 999, 0];
             [H_Los, H_Los_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
             [H_NLos, H_NLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb, obj.phi);
             obj.H_combined = obj.compute_Heff(H_Los, H_NLos);
@@ -772,9 +769,6 @@ classdef RISISAC_V2X_Sim < handle
             obj.gamma_c = obj.computeSNR();
             obj.rate = obj.getrate();
             obj.peb = obj.calculatePerformanceMetrics(obj.Wx, H_Los_3d, H_NLos_3d);
-            % obj.calculated_values();
-            % obj.destination = [randi([0, 1000]), randi([0, 1000]), 0];
-
             obj.car_loc = obj.starting_pos;
             obj.target_loc = obj.car_loc;
             obj.time = 0;
