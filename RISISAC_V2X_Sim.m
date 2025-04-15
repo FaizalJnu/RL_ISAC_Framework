@@ -33,6 +33,8 @@ classdef RISISAC_V2X_Sim < handle
         H_combined
         Jzao
         waypoint_idx = 1;
+        state_mean
+        state_std
 
         currentWaypointIndex = 1;   % Start from the first waypoint
         reachedWaypoint = true;     % Ensure path planning starts immediately
@@ -391,22 +393,40 @@ classdef RISISAC_V2X_Sim < handle
             phi_real = real(diag(obj.phi))';
             phi_imag = imag(diag(obj.phi))'; 
             Rc = obj.rate;
+            Rc_norm = Rc / 1e8;
+            % disp(obj.phi);
             
             H = obj.H_combined;
+            % disp(obj.H_combined);
             H_real = real(H(:))';
             H_imag = imag(H(:))';
             state = [
                 phi_real, ...
                 phi_imag, ...
-                Rc, ...
+                Rc_norm, ...
                 H_real, ... 
                 H_imag ...
             ];
-            disp(H_real);
-            disp(H_imag);
+            % disp(H_real);
+            % disp(H_imag);
             state = real(state);
             state = state(:)';
-            % disp(size(state));
+
+            % if ~isfield(obj, 'state_mean') || ~isfield(obj, 'state_std')
+            %     obj.state_mean = zeros(size(state));
+            %     obj.state_std = ones(size(state));
+            % end
+            
+            % % Update running statistics (with a small learning rate)
+            % lr = 0.001;
+            % obj.state_mean = (1-lr) * obj.state_mean + lr * state;
+            % obj.state_std = (1-lr) * obj.state_std + lr * (state - obj.state_mean).^2;
+            
+            % % Normalize state (with epsilon to avoid division by zero)
+            % state = (state - obj.state_mean) ./ (sqrt(obj.state_std) + 1e-8);
+            
+            % % Optional: Clip to reasonable range
+            % state = max(min(state, 10), -10);
         end
 
         function initializeVisualization(obj)
@@ -453,6 +473,7 @@ classdef RISISAC_V2X_Sim < handle
         function [next_state, reward, peb, rate, power, done] = step(obj, action)
             % Update RIS phases based on action
             ris_phases = action(1:obj.Nr);  % values in [0, 1)
+            % disp(ris_phases);
             % disp("this is the step: " + obj.stepCount);
             % disp(ris_phases);
             u = exp(1j * 2 * pi * ris_phases);  % convert to complex values on unit circle
@@ -474,7 +495,7 @@ classdef RISISAC_V2X_Sim < handle
             rate = getrate(obj);
             obj.rate = rate;
             peb = obj.calculatePerformanceMetrics(obj.Wx, H_Los_3d, H_NLos_3d);
-            % disp("step" + obj.stepCount);
+            disp("step" + obj.stepCount);
             % disp("peb" + peb);
             obj.peb = peb;
             

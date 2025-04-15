@@ -149,6 +149,41 @@ class ReplayBuffer:
                 torch.FloatTensor(reward), 
                 torch.FloatTensor(next_state),
                 torch.FloatTensor(done))
+    
+
+class Replay:
+    def __init__(self, max_size):
+        self.buffer = deque(maxlen=max_size)
+    
+    def push(self, state, action, reward, next_state):
+        experience = (state, action, np.array([reward]), next_state)
+        self.buffer.append(experience)
+
+    def sample(self, batch_size):
+        state_batch = []
+        action_batch = []
+        reward_batch = []
+        next_state_batch = []
+        done_batch = []
+
+        batch = random.sample(self.buffer, batch_size)
+        print("we are finally here")
+
+        for experience in batch:
+            state, action, reward, next_state = experience
+            #print(state.shape)
+            state_batch.append(state)
+            action_batch.append(action)
+            reward_batch.append(reward)
+            next_state_batch.append(next_state)
+            #done_batch.append(done)
+        #print(state_batch)
+        #print(torch.FloatTensor(state_batch))
+        
+        return state_batch, action_batch, reward_batch, next_state_batch
+
+    def __len__(self):
+        return len(self.buffer)
 
 class SumTree:
     """

@@ -80,7 +80,7 @@ class Replay:
         return len(self.buffer)
 
 class Actor(nn.Module):
-    def __init__(self, input_size, hidden_size_1, hidden_size_2, output_size, learning_rate = 3e-4):
+    def __init__(self, input_size, hidden_size_1, hidden_size_2, output_size, learning_rate):
         super(Actor, self).__init__()
         self.linear1 = nn.Linear(input_size, hidden_size_1)
         self.linear2 = nn.Linear(hidden_size_1, hidden_size_2)
@@ -93,6 +93,11 @@ class Actor(nn.Module):
         """
         x = F.relu(self.linear2(F.relu(self.linear1(state))))
         x = torch.tanh(self.linear3(x))
+        if torch.isnan(x).any():
+            print("NaN detected in actor output!")
+            print(f"Input state min/max: {state.min().item()}, {state.max().item()}")
+            # You could also print weights to see if they've exploded
+            print(f"Layer 1 weights min/max: {self.linear1.weight.min().item()}, {self.linear1.weight.max().item()}")
         return x
 
 
@@ -150,8 +155,8 @@ class DDPGagent:
         # Networks
         self.actor_eval = Actor(num_states, hidden_size_1, hidden_size_2, num_actions).to(self.device)
         self.actor_target = Actor(num_states, hidden_size_1, hidden_size_2, num_actions).to(self.device)
-        self.critic_eval = Critic(2*num_states+1, hidden_size_1, hidden_size_2, 1).to(self.device)
-        self.critic_target = Critic(2*num_states+1, hidden_size_1, hidden_size_2, 1).to(self.device)
+        self.critic_eval = Critic(num_states + num_actions, hidden_size_1, hidden_size_2, 1).to(self.device)
+        self.critic_target = Critic(num_actions+num_states, hidden_size_1, hidden_size_2, 1).to(self.device)
 
         self.replay_buffer = Replay(
             max_size=max_memory_size
@@ -164,7 +169,7 @@ class DDPGagent:
             target_param.data.copy_(param.data)
         
         # Training
-        self.memory = Replay(max_memory_size)        
+        self.memory = Replay(max_memory_size)       
         self.critic_criterion  = nn.MSELoss()
         self.actor_optimizer  = optim.Adam(self.actor_eval.parameters(), lr=actor_learning_rate)
         self.critic_optimizer = optim.Adam(self.critic_eval.parameters(), lr=critic_learning_rate)
@@ -181,6 +186,10 @@ class DDPGagent:
 
         self.current_actor_lr = actor_learning_rate
         self.current_critic_lr = critic_learning_rate
+
+                # In your optimizer update step
+        torch.nn.utils.clip_grad_norm_(self.actor_eval.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(self.critic_eval.parameters(), max_norm=1.0)
 
     def get_current_actor_lr(self):
         return self.actor_optimizer.param_groups[0]['lr']
@@ -213,13 +222,15 @@ class DDPGagent:
         self.current_critic_lr = self.critic_optimizer.param_groups[0]['lr']  
 
     def update(self, batch_size):
+        print(len(self.memory)) 
         if len(self.memory) < batch_size:
             return None, None  # Skip update if not enough data
+        
         states, actions, rewards, next_states = self.memory.sample(batch_size)
-        states = torch.FloatTensor(states)
-        actions = torch.FloatTensor(actions)
-        rewards = torch.FloatTensor(rewards)
-        next_states = torch.FloatTensor(next_states)      
+        states = torch.FloatTensor(states).to(self.device)
+        actions = torch.FloatTensor(actions).to(self.device)
+        rewards = torch.FloatTensor(rewards).to(self.device)
+        next_states = torch.FloatTensor(next_states).to(self.device)
         Qvals = self.critic_eval.forward(states, actions)
         next_actions = self.actor_target.forward(next_states)
         next_Q = self.critic_target.forward(next_states, next_actions.detach())
