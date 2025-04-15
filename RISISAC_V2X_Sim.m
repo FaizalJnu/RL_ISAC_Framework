@@ -451,6 +451,8 @@ classdef RISISAC_V2X_Sim < handle
         function [next_state, reward, peb, rate, power, done] = step(obj, action)
             % Update RIS phases based on action
             ris_phases = action(1:obj.Nr);  % values in [0, 1)
+            disp("this is the step: " + obj.stepCount);
+            % disp(ris_phases);
             u = exp(1j * 2 * pi * ris_phases);  % convert to complex values on unit circle
             obj.phi = diag(u);  % assign to diagonal
             % fileID = fopen('phi_values.txt','w');
@@ -470,8 +472,8 @@ classdef RISISAC_V2X_Sim < handle
             rate = getrate(obj);
             obj.rate = rate;
             peb = obj.calculatePerformanceMetrics(obj.Wx, H_Los_3d, H_NLos_3d);
-            disp("step" + obj.stepCount);
-            disp("peb" + peb);
+            % disp("step" + obj.stepCount);
+            % disp("peb" + peb);
             obj.peb = peb;
             
             % Compute reward
@@ -1039,7 +1041,7 @@ classdef RISISAC_V2X_Sim < handle
             % disp(J_zao);
             % Compute final Fisher Information Matrix
             J = T * J_zao * conj(T');
-            % disp("this is J");
+            % disp("this is J: ");
             % disp(J);
         end
 
@@ -1047,22 +1049,60 @@ classdef RISISAC_V2X_Sim < handle
             % Initialize Fisher Information Matrix
             J_zao = zeros(7, 7);
             
-            % Compute geometric parameters
             [~, ~, ~, ~, ~, ~, delays, angles] = computeGeometricParameters(obj);
-            
-            % Extract parameters
-            psi_rt = angles.ris_to_target.aoa;
-            psi_bt = angles.bs_to_target_transmit;
-            psi_tb = angles.bs_to_target_receive;
-            phi_rt_a = angles.ris_to_target.azimuth;
-            phi_rt_e = angles.ris_to_target.elevation_angle;
+            N=obj.Ns;
             tau_l = delays.line_of_sight;
             tau_nl = delays.non_line_of_sight;
+            % Different derivative calculations for different parameters
+            % For time delays (param_idx 1-2)
+            psi_bt = angles.bs_to_target_transmit;
+            psi_tb = angles.bs_to_target_receive;
             
-            zao = {tau_l, tau_nl, psi_rt, phi_rt_a, phi_rt_e, psi_bt, psi_tb};
+            % BS-RIS channel parameters
+            psi_br = angles.bs_to_ris.azimuth;
+            phi_abr = angles.bs_to_ris.elevation_azimuth;
+            phi_ebr = angles.bs_to_ris.elevation_angle;
+
+            a_psi_br = compute_a_psi(obj, obj.Nb, psi_br, obj.lambda, obj.lambda/2);
+            a_phi_abr = compute_a_phi(obj, sqrt(obj.Nr), phi_abr, phi_ebr, obj.lambda, obj.lambda/2);
+            
+            % RIS-Target channel parameters
+            psi_rt = angles.ris_to_target.azimuth;
+            phi_art = angles.ris_to_target.elevation_angle;
+            phi_ert = angles.ris_to_target.elevation_angle;
+
+            a_psi_rt = compute_a_psi(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2);
+            a_phi_art = compute_a_phi(obj, sqrt(obj.Nr), phi_art, phi_ert, obj.lambda/2, obj.lambda/2);
+
+            % Get frequency-dependent steering vectors (dimensions: Nb×Ns and Nt×Ns)
+            a_psi_bt = compute_a_psi(obj, obj.Nb, psi_bt, obj.lambda, obj.lambda/2);
+            a_psi_tb = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2);
+            a_rt = 1j * (2*pi/obj.lambda) * cos(psi_rt) * diag(0:obj.Nt-1);
+            a_bt = 1j * (2*pi/obj.lambda) * cos(psi_bt) * diag(0:obj.Nt-1);
+            a_tb = 1j * (2*pi/obj.lambda) * cos(psi_tb) * diag(0:obj.Nt-1);
+
+            gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(3);
+            gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(4);
+
+            a_rt_a = 1j * (2 * pi / obj.lambda) * (obj.lambda/2) * ((obj.Nx - 1) * cos(phi_art) * sin(phi_ert));
+            a_rt_e = 1j * (2 * pi / obj.lambda) * (obj.lambda/2) * ((obj.Nx - 1) * sin(phi_art) * cos(phi_ert) - (obj.Ny - 1) * sin(phi_ert));
+
+            % % --- BEGIN INSERTED PRINT STATEMENTS ---
+            % disp('--- Extracted Geometric Parameters ---');
+            % fprintf('  psi_rt (RIS->Target AoA):      %f\n', psi_rt);
+            % fprintf('  psi_bt (BS->Target Transmit Angle): %f\n', psi_bt); % Clarify if AoA/AoD
+            % fprintf('  psi_tb (Target->BS Receive Angle): %f\n', psi_tb); % Clarify if AoA/AoD
+            % fprintf('  phi_rt_a (RIS->Target Azimuth): %f\n', phi_art);
+            % fprintf('  phi_rt_e (RIS->Target Elevation):%f\n', phi_ert);
+            % fprintf('  tau_l (LoS Delay):             %g\n', tau_l);  % %g is good for delays which might be small
+            % fprintf('  tau_nl (NLoS Delay):           %g\n', tau_nl);
+            % disp('------------------------------------');
+            % % --- END INSERTED PRINT STATEMENTS ---
+
+            % zao = {tau_l, tau_nl, psi_rt, phi_rt_a, phi_rt_e, psi_bt, psi_tb};
             
             % Calculate scaling factor with normalization to prevent numerical issues
-            scaling_factor = 10e6;
+            scaling_factor = -1;
             % disp(scaling_factor);
             for i = 1:7
                 for j = 1:7
@@ -1072,8 +1112,8 @@ classdef RISISAC_V2X_Sim < handle
                         % disp(mu)
                         
                         % Use a more accurate derivative calculation
-                        dmu_i = calculate_derivative(obj, i, n, Wx);
-                        dmu_j = calculate_derivative(obj, j, n, Wx);
+                        dmu_i = calculate_derivative(obj, i, n, Wx, a_psi_br, a_phi_abr, a_psi_rt, a_phi_art, a_psi_bt, a_psi_tb, a_rt, a_bt, a_tb, gamma_l, gamma_nl, a_rt_a, a_rt_e, tau_l, tau_nl);
+                        dmu_j = calculate_derivative(obj, j, n, Wx, a_psi_br, a_phi_abr, a_psi_rt, a_phi_art, a_psi_bt, a_psi_tb, a_rt, a_bt, a_tb, gamma_l, gamma_nl, a_rt_a, a_rt_e, tau_l, tau_nl);
                         
                         dmu_i_h = conj(dmu_i');
                         inner_product = dmu_i_h * dmu_j;
@@ -1089,101 +1129,62 @@ classdef RISISAC_V2X_Sim < handle
         end
         
         % Helper function for calculating derivatives
-        % function dmu = calculate_derivative(obj, mu, zao_params, param_idx, subcarrier_idx, H_Los, H_NLos, Wx)
-        %     % This function should implement proper partial derivative calculation
-        %     % based on the channel model and parameter type
-        %     [~, ~, ~, ~, ~, ~, delays, angles] = computeGeometricParameters(obj);
-        %     N=obj.Ns;
-        %     tau_l = delays.line_of_sight;
-        %     tau_nl = delays.non_line_of_sight;
-        %     % Different derivative calculations for different parameters
-        %     % For time delays (param_idx 1-2)
-        %     psi_bt = angles.bs_to_target_transmit;
-        %     psi_tb = angles.bs_to_target_receive;
-            
-        %     % BS-RIS channel parameters
-        %     psi_br = angles.bs_to_ris.azimuth;
-        %     phi_abr = angles.bs_to_ris.elevation_azimuth;
-        %     phi_ebr = angles.bs_to_ris.elevation_angle;
+        function dmu = calculate_derivative(obj, param_idx, subcarrier_idx, Wx, a_psi_br, a_phi_abr, a_psi_rt, a_phi_art, a_psi_bt, a_psi_tb, a_rt, a_bt, a_tb, gamma_l, gamma_nl, a_rt_a, a_rt_e, tau_l, tau_nl)
+            % This function should implement proper partial derivative calculation
+            % based on the channel model and parameter typ
+            N = 10;
+            freq_factor = (subcarrier_idx / N);
+            if param_idx <= 2
+                % Time domain derivative (frequency domain multiplication)
+                % omega_n = 2*pi*subcarrier_idx; % Angular frequency
+                if param_idx == 1 % LoS delay
+                    dmu = gamma_l * obj.h_l * (1j * 2 * pi * obj.B * freq_factor) * ...
+                        exp(1j * 2 * pi * obj.B * freq_factor * tau_l) * ...
+                        a_psi_bt(:,subcarrier_idx) * conj(a_psi_tb(:,subcarrier_idx)') * Wx(:,subcarrier_idx);
 
-        %     a_psi_br = compute_a_psi(obj, obj.Nb, psi_br, obj.lambda, obj.lambda/2);
-        %     a_phi_abr = compute_a_phi(obj, sqrt(obj.Nr), phi_abr, phi_ebr, obj.lambda, obj.lambda/2);
-            
-        %     % RIS-Target channel parameters
-        %     psi_rt = angles.ris_to_target.azimuth;
-        %     phi_art = angles.ris_to_target.elevation_angle;
-        %     phi_ert = angles.ris_to_target.elevation_angle;
+                else % NLoS delay
+                    dmu = gamma_nl * obj.h_nl * (1j * 2 * pi * obj.B * freq_factor) * ...
+                        exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
+                        a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * obj.phi * a_phi_abr(:,subcarrier_idx) * conj(a_psi_br(:,subcarrier_idx)') *...
+                        Wx(:, subcarrier_idx);
+                end
+            % For angle parameters (param_idx 3-7)
+            else
+                % Different derivatives for different angle parameters
+                % (This is a placeholder - actual calculations would be model-specific)
+                if param_idx == 3 % psi_rt
+                    dmu = gamma_nl * obj.h_nl * ...
+                        exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
+                        a_rt * a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * obj.phi * ...
+                        a_phi_abr(:,subcarrier_idx) * conj(a_psi_br(:,subcarrier_idx)') * Wx(:, subcarrier_idx);
+                elseif param_idx == 4 % phi_rt_a
+                    dmu = gamma_nl * obj.h_nl * ...
+                        exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
+                        a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * diag(a_rt_a) * obj.phi * ...
+                        a_phi_abr(:,subcarrier_idx) * conj(a_psi_br(:,subcarrier_idx)') * Wx(:, subcarrier_idx);
+                elseif param_idx == 5 % phi_rt_e
+                    dmu = gamma_nl * obj.h_nl * ...
+                        exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
+                        a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * diag(a_rt_e) * obj.phi * a_phi_abr(:,subcarrier_idx) * ...
+                        conj(a_psi_br(:,subcarrier_idx)')*Wx(:,subcarrier_idx);
+                elseif param_idx == 6 % psi_bt
+                    dmu = gamma_l * obj.h_l * exp(1j * 2 * pi * obj.B * freq_factor * tau_l) * ...
+                        a_psi_tb(:,subcarrier_idx) * ...
+                        conj(a_psi_bt(:,subcarrier_idx)') * ...
+                        a_bt * ...
+                        a_psi_bt(:,subcarrier_idx) * ...
+                        (a_psi_bt(:,subcarrier_idx)' * Wx(:, subcarrier_idx));
 
-        %     a_psi_rt = compute_a_psi(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2);
-        %     a_phi_art = compute_a_phi(obj, sqrt(obj.Nr), phi_art, phi_ert, obj.lambda/2, obj.lambda/2);
-
-        %     % Get frequency-dependent steering vectors (dimensions: Nb×Ns and Nt×Ns)
-        %     a_psi_bt = compute_a_psi(obj, obj.Nb, psi_bt, obj.lambda, obj.lambda/2);
-        %     a_psi_tb = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2);
-
-        %     a_rt = 1j * (2*pi/obj.lambda) * cos(psi_rt) * diag(0:obj.Nt-1);
-        %     a_bt = 1j * (2*pi/obj.lambda) * cos(psi_bt) * diag(0:obj.Nt-1);
-        %     a_tb = 1j * (2*pi/obj.lambda) * cos(psi_tb) * diag(0:obj.Nt-1);
-
-        %     gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
-        %     gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
-
-        %     freq_factor = (subcarrier_idx / N);
-
-        %     if param_idx <= 2
-        %         % Time domain derivative (frequency domain multiplication)
-        %         % omega_n = 2*pi*subcarrier_idx; % Angular frequency
-        %         if param_idx == 1 % LoS delay
-        %             dmu = gamma_l * obj.h_l * (1j * 2 * pi * obj.B * freq_factor) * ...
-        %                 exp(1j * 2 * pi * obj.B * freq_factor * tau_l) * ...
-        %                 a_psi_bt(:,subcarrier_idx) * conj(a_psi_tb(:,subcarrier_idx)') * Wx(:,subcarrier_idx);
-
-        %         else % NLoS delay
-        %             dmu = gamma_nl * obj.h_nl * (1j * 2 * pi * obj.B * freq_factor) * ...
-        %                 exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
-        %                 a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * obj.phi * a_phi_abr(:,subcarrier_idx) * conj(a_psi_br(:,subcarrier_idx)') *...
-        %                 Wx(:, subcarrier_idx);
-        %         end
-        %     % For angle parameters (param_idx 3-7)
-        %     else
-        %         a_rt_a = 1j * (2 * pi / obj.lambda) * (obj.lambda/2) * ((obj.Nx - 1) * cos(phi_art) * sin(phi_ert));
-        %         a_rt_e = 1j * (2 * pi / obj.lambda) * (obj.lambda/2) * ((obj.Nx - 1) * sin(phi_art) * cos(phi_ert) - (obj.Ny - 1) * sin(phi_ert));
-                
-        %         % Different derivatives for different angle parameters
-        %         % (This is a placeholder - actual calculations would be model-specific)
-        %         if param_idx == 3 % psi_rt
-        %             dmu = gamma_nl * obj.h_nl * ...
-        %                 exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
-        %                 a_rt * a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * obj.phi * ...
-        %                 a_phi_abr(:,subcarrier_idx) * conj(a_psi_br(:,subcarrier_idx)') * Wx(:, subcarrier_idx);
-        %         elseif param_idx == 4 % phi_rt_a
-        %             dmu = gamma_nl * obj.h_nl * ...
-        %                 exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
-        %                 a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * diag(a_rt_a) * obj.phi * ...
-        %                 a_phi_abr(:,subcarrier_idx) * conj(a_psi_br(:,subcarrier_idx)') * Wx(:, subcarrier_idx);
-        %         elseif param_idx == 5 % phi_rt_e
-        %             dmu = gamma_nl * obj.h_nl * ...
-        %                 exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
-        %                 a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * diag(a_rt_e) * obj.phi * a_phi_abr(:,subcarrier_idx) * ...
-        %                 conj(a_psi_br(:,subcarrier_idx)')*Wx(:,subcarrier_idx);
-        %         elseif param_idx == 6 % psi_bt
-        %             dmu = gamma_l * obj.h_l * exp(1j * 2 * pi * obj.B * freq_factor * tau_l) * ...
-        %                 a_psi_tb(:,subcarrier_idx) * ...
-        %                 conj(a_psi_bt(:,subcarrier_idx)') * ...
-        %                 a_bt * ...
-        %                 a_psi_bt(:,subcarrier_idx) * ...
-        %                 (a_psi_bt(:,subcarrier_idx)' * Wx(:, subcarrier_idx));
-
-        %         else % psi_tb
-        %             dmu = gamma_l * obj.h_l * exp(1j * 2 * pi * obj.B * freq_factor * tau_l) * ...
-        %                 a_psi_tb(:,subcarrier_idx) * ...
-        %                 conj(a_psi_bt(:,subcarrier_idx)') * ...
-        %                 a_tb * ...
-        %                 a_psi_tb(:,subcarrier_idx) * ...
-        %                 (a_psi_tb(:,subcarrier_idx)' * Wx(:, subcarrier_idx));                  
-        %         end
-        %     end
-        % end
+                else % psi_tb
+                    dmu = gamma_l * obj.h_l * exp(1j * 2 * pi * obj.B * freq_factor * tau_l) * ...
+                        a_psi_tb(:,subcarrier_idx) * ...
+                        conj(a_psi_bt(:,subcarrier_idx)') * ...
+                        a_tb * ...
+                        a_psi_tb(:,subcarrier_idx) * ...
+                        (a_psi_tb(:,subcarrier_idx)' * Wx(:, subcarrier_idx));                  
+                end
+            end
+        end
 
         % function [J_zao] = calculate_Jzao(obj, Pb_dbm, N, Wx, H_Los_3d, H_NLos_3d)
         %     % Initialize Fisher Information Matrix
@@ -1236,132 +1237,132 @@ classdef RISISAC_V2X_Sim < handle
         %     % disp(J_zao);
         % end
         
-        function dmu = calculate_derivative(obj, param_idx, subcarrier_idx, Wx)
-            % Extract parameters once
-            [~, ~, ~, ~, ~, ~, delays, angles] = computeGeometricParameters(obj);
-            N = obj.Ns;
-            tau_l = delays.line_of_sight;
-            tau_nl = delays.non_line_of_sight;
+        % function dmu = calculate_derivative(obj, param_idx, subcarrier_idx, Wx)
+        %     % Extract parameters once
+        %     [~, ~, ~, ~, ~, ~, delays, angles] = computeGeometricParameters(obj);
+        %     N = obj.Ns;
+        %     tau_l = delays.line_of_sight;
+        %     tau_nl = delays.non_line_of_sight;
             
-            % BS-Target angles
-            psi_bt = angles.bs_to_target_transmit;
-            psi_tb = angles.bs_to_target_receive;
+        %     % BS-Target angles
+        %     psi_bt = angles.bs_to_target_transmit;
+        %     psi_tb = angles.bs_to_target_receive;
             
-            % BS-RIS channel parameters
-            psi_br = angles.bs_to_ris.azimuth;
-            phi_abr = angles.bs_to_ris.elevation_azimuth;
-            phi_ebr = angles.bs_to_ris.elevation_angle;
+        %     % BS-RIS channel parameters
+        %     psi_br = angles.bs_to_ris.azimuth;
+        %     phi_abr = angles.bs_to_ris.elevation_azimuth;
+        %     phi_ebr = angles.bs_to_ris.elevation_angle;
             
-            % RIS-Target channel parameters
-            psi_rt = angles.ris_to_target.azimuth;
-            phi_art = angles.ris_to_target.elevation_angle;
-            phi_ert = angles.ris_to_target.elevation_angle;
+        %     % RIS-Target channel parameters
+        %     psi_rt = angles.ris_to_target.azimuth;
+        %     phi_art = angles.ris_to_target.elevation_angle;
+        %     phi_ert = angles.ris_to_target.elevation_angle;
             
-            % Precompute frequency factor
-            freq_factor = (subcarrier_idx / N);
-            omega_n = 2 * pi * obj.B * freq_factor;
+        %     % Precompute frequency factor
+        %     freq_factor = (subcarrier_idx / N);
+        %     omega_n = 2 * pi * obj.B * freq_factor;
             
-            % Precompute common factors
-            gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
-            gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
+        %     % Precompute common factors
+        %     gamma_l = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_l);
+        %     gamma_nl = sqrt(obj.Nb*obj.Nt)/sqrt(obj.rho_nl);
             
-            exp_factor_los = exp(1j * omega_n * tau_l);
-            exp_factor_nlos = exp(1j * omega_n * tau_nl);
+        %     exp_factor_los = exp(1j * omega_n * tau_l);
+        %     exp_factor_nlos = exp(1j * omega_n * tau_nl);
             
-            % Precompute all steering vectors needed by any case
-            a_psi_bt = compute_a_psi(obj, obj.Nb, psi_bt, obj.lambda, obj.lambda/2);
-            a_psi_tb = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2);
-            a_psi_rt = compute_a_psi(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2);
-            a_psi_br = compute_a_psi(obj, obj.Nb, psi_br, obj.lambda, obj.lambda/2);
-            a_phi_abr = compute_a_phi(obj, sqrt(obj.Nr), phi_abr, phi_ebr, obj.lambda, obj.lambda/2);
-            a_phi_art = compute_a_phi(obj, sqrt(obj.Nr), phi_art, phi_ert, obj.lambda/2, obj.lambda/2);
+        %     % Precompute all steering vectors needed by any case
+        %     a_psi_bt = compute_a_psi(obj, obj.Nb, psi_bt, obj.lambda, obj.lambda/2);
+        %     a_psi_tb = compute_a_psi(obj, obj.Nt, psi_tb, obj.lambda, obj.lambda/2);
+        %     a_psi_rt = compute_a_psi(obj, obj.Nt, psi_rt, obj.lambda, obj.lambda/2);
+        %     a_psi_br = compute_a_psi(obj, obj.Nb, psi_br, obj.lambda, obj.lambda/2);
+        %     a_phi_abr = compute_a_phi(obj, sqrt(obj.Nr), phi_abr, phi_ebr, obj.lambda, obj.lambda/2);
+        %     a_phi_art = compute_a_phi(obj, sqrt(obj.Nr), phi_art, phi_ert, obj.lambda/2, obj.lambda/2);
             
-            % Different derivative calculations for different parameters
-            switch param_idx
-                case 1 % LoS delay
-                    % Time domain derivative (frequency domain multiplication)
-                    a_psi_bt_n = a_psi_bt(:,subcarrier_idx);
-                    a_psi_tb_n = a_psi_tb(:,subcarrier_idx);
+        %     % Different derivative calculations for different parameters
+        %     switch param_idx
+        %         case 1 % LoS delay
+        %             % Time domain derivative (frequency domain multiplication)
+        %             a_psi_bt_n = a_psi_bt(:,subcarrier_idx);
+        %             a_psi_tb_n = a_psi_tb(:,subcarrier_idx);
                     
-                    dmu = gamma_l * obj.h_l * (1j * omega_n) * exp_factor_los * ...
-                        a_psi_bt_n * conj(a_psi_tb_n') * Wx(:,subcarrier_idx);
+        %             dmu = gamma_l * obj.h_l * (1j * omega_n) * exp_factor_los * ...
+        %                 a_psi_bt_n * conj(a_psi_tb_n') * Wx(:,subcarrier_idx);
                     
-                case 2 % NLoS delay
-                    a_psi_rt_n = a_psi_rt(:,subcarrier_idx);
-                    a_phi_art_n = a_phi_art(:,subcarrier_idx);
-                    a_phi_abr_n = a_phi_abr(:,subcarrier_idx);
-                    a_psi_br_n = a_psi_br(:,subcarrier_idx);
+        %         case 2 % NLoS delay
+        %             a_psi_rt_n = a_psi_rt(:,subcarrier_idx);
+        %             a_phi_art_n = a_phi_art(:,subcarrier_idx);
+        %             a_phi_abr_n = a_phi_abr(:,subcarrier_idx);
+        %             a_psi_br_n = a_psi_br(:,subcarrier_idx);
                     
-                    dmu = gamma_nl * obj.h_nl * (1j * omega_n) * exp_factor_nlos * ...
-                        a_psi_rt_n * conj(a_phi_art_n') * obj.phi * a_phi_abr_n * ...
-                        conj(a_psi_br_n') * Wx(:, subcarrier_idx);
+        %             dmu = gamma_nl * obj.h_nl * (1j * omega_n) * exp_factor_nlos * ...
+        %                 a_psi_rt_n * conj(a_phi_art_n') * obj.phi * a_phi_abr_n * ...
+        %                 conj(a_psi_br_n') * Wx(:, subcarrier_idx);
                     
-                case 3 % psi_rt
-                    a_psi_rt_n = a_psi_rt(:,subcarrier_idx);
-                    a_phi_art_n = a_phi_art(:,subcarrier_idx);
-                    a_phi_abr_n = a_phi_abr(:,subcarrier_idx);
-                    a_psi_br_n = a_psi_br(:,subcarrier_idx);
+        %         case 3 % psi_rt
+        %             a_psi_rt_n = a_psi_rt(:,subcarrier_idx);
+        %             a_phi_art_n = a_phi_art(:,subcarrier_idx);
+        %             a_phi_abr_n = a_phi_abr(:,subcarrier_idx);
+        %             a_psi_br_n = a_psi_br(:,subcarrier_idx);
                     
-                    % Precompute the steering vector derivative
-                    a_rt = 1j * (2*pi/obj.lambda) * cos(psi_rt) * diag(0:obj.Nt-1);
+        %             % Precompute the steering vector derivative
+        %             a_rt = 1j * (2*pi/obj.lambda) * cos(psi_rt) * diag(0:obj.Nt-1);
                     
-                    dmu = gamma_nl * obj.h_nl * exp_factor_nlos * ...
-                        a_rt * a_psi_rt_n * conj(a_phi_art_n') * obj.phi * ...
-                        a_phi_abr_n * conj(a_psi_br_n') * Wx(:, subcarrier_idx);
+        %             dmu = gamma_nl * obj.h_nl * exp_factor_nlos * ...
+        %                 a_rt * a_psi_rt_n * conj(a_phi_art_n') * obj.phi * ...
+        %                 a_phi_abr_n * conj(a_psi_br_n') * Wx(:, subcarrier_idx);
                     
-                case 4 % phi_rt_a
-                    a_psi_rt_n = a_psi_rt(:,subcarrier_idx);
-                    a_phi_art_n = a_phi_art(:,subcarrier_idx);
-                    a_phi_abr_n = a_phi_abr(:,subcarrier_idx);
-                    a_psi_br_n = a_psi_br(:,subcarrier_idx);
+        %         case 4 % phi_rt_a
+        %             a_psi_rt_n = a_psi_rt(:,subcarrier_idx);
+        %             a_phi_art_n = a_phi_art(:,subcarrier_idx);
+        %             a_phi_abr_n = a_phi_abr(:,subcarrier_idx);
+        %             a_psi_br_n = a_psi_br(:,subcarrier_idx);
                     
-                    % Angle derivative
-                    a_rt_a = 1j * (2 * pi / obj.lambda) * (obj.lambda/2) * ((obj.Nx - 1) * cos(phi_art) * sin(phi_ert));
+        %             % Angle derivative
+        %             a_rt_a = 1j * (2 * pi / obj.lambda) * (obj.lambda/2) * ((obj.Nx - 1) * cos(phi_art) * sin(phi_ert));
                     
-                    dmu = gamma_nl * obj.h_nl * exp_factor_nlos * ...
-                        a_psi_rt_n * conj(a_phi_art_n') * diag(a_rt_a) * obj.phi * ...
-                        a_phi_abr_n * conj(a_psi_br_n') * Wx(:, subcarrier_idx);
+        %             dmu = gamma_nl * obj.h_nl * exp_factor_nlos * ...
+        %                 a_psi_rt_n * conj(a_phi_art_n') * diag(a_rt_a) * obj.phi * ...
+        %                 a_phi_abr_n * conj(a_psi_br_n') * Wx(:, subcarrier_idx);
                     
-                case 5 % phi_rt_e
-                    a_psi_rt_n = a_psi_rt(:,subcarrier_idx);
-                    a_phi_art_n = a_phi_art(:,subcarrier_idx);
-                    a_phi_abr_n = a_phi_abr(:,subcarrier_idx);
-                    a_psi_br_n = a_psi_br(:,subcarrier_idx);
+        %         case 5 % phi_rt_e
+        %             a_psi_rt_n = a_psi_rt(:,subcarrier_idx);
+        %             a_phi_art_n = a_phi_art(:,subcarrier_idx);
+        %             a_phi_abr_n = a_phi_abr(:,subcarrier_idx);
+        %             a_psi_br_n = a_psi_br(:,subcarrier_idx);
                     
-                    % Angle derivative
-                    a_rt_e = 1j * (2 * pi / obj.lambda) * (obj.lambda/2) * ((obj.Nx - 1) * sin(phi_art) * cos(phi_ert) - (obj.Ny - 1) * sin(phi_ert));
+        %             % Angle derivative
+        %             a_rt_e = 1j * (2 * pi / obj.lambda) * (obj.lambda/2) * ((obj.Nx - 1) * sin(phi_art) * cos(phi_ert) - (obj.Ny - 1) * sin(phi_ert));
                     
-                    dmu = gamma_nl * obj.h_nl * exp_factor_nlos * ...
-                        a_psi_rt_n * conj(a_phi_art_n') * diag(a_rt_e) * obj.phi * a_phi_abr_n * ...
-                        conj(a_psi_br_n') * Wx(:, subcarrier_idx);
+        %             dmu = gamma_nl * obj.h_nl * exp_factor_nlos * ...
+        %                 a_psi_rt_n * conj(a_phi_art_n') * diag(a_rt_e) * obj.phi * a_phi_abr_n * ...
+        %                 conj(a_psi_br_n') * Wx(:, subcarrier_idx);
                     
-                case 6 % psi_bt
-                    a_psi_bt_n = a_psi_bt(:,subcarrier_idx);
-                    a_psi_tb_n = a_psi_tb(:,subcarrier_idx);
+        %         case 6 % psi_bt
+        %             a_psi_bt_n = a_psi_bt(:,subcarrier_idx);
+        %             a_psi_tb_n = a_psi_tb(:,subcarrier_idx);
                     
-                    % Angle derivative
-                    a_bt = 1j * (2*pi/obj.lambda) * cos(psi_bt) * diag(0:obj.Nt-1);
+        %             % Angle derivative
+        %             a_bt = 1j * (2*pi/obj.lambda) * cos(psi_bt) * diag(0:obj.Nt-1);
                     
-                    % Optimize matrix multiplications
-                    inner_product = a_psi_bt_n' * Wx(:, subcarrier_idx);
+        %             % Optimize matrix multiplications
+        %             inner_product = a_psi_bt_n' * Wx(:, subcarrier_idx);
                     
-                    dmu = gamma_l * obj.h_l * exp_factor_los * ...
-                        a_psi_tb_n * conj(a_psi_bt_n') * a_bt * a_psi_bt_n * inner_product;
+        %             dmu = gamma_l * obj.h_l * exp_factor_los * ...
+        %                 a_psi_tb_n * conj(a_psi_bt_n') * a_bt * a_psi_bt_n * inner_product;
                     
-                case 7 % psi_tb
-                    a_psi_bt_n = a_psi_bt(:,subcarrier_idx);
-                    a_psi_tb_n = a_psi_tb(:,subcarrier_idx);
+        %         case 7 % psi_tb
+        %             a_psi_bt_n = a_psi_bt(:,subcarrier_idx);
+        %             a_psi_tb_n = a_psi_tb(:,subcarrier_idx);
                     
-                    % Angle derivative
-                    a_tb = 1j * (2*pi/obj.lambda) * cos(psi_tb) * diag(0:obj.Nt-1);
+        %             % Angle derivative
+        %             a_tb = 1j * (2*pi/obj.lambda) * cos(psi_tb) * diag(0:obj.Nt-1);
                     
-                    % Optimize matrix multiplications
-                    inner_product = a_psi_tb_n' * Wx(:, subcarrier_idx);
+        %             % Optimize matrix multiplications
+        %             inner_product = a_psi_tb_n' * Wx(:, subcarrier_idx);
                     
-                    dmu = gamma_l * obj.h_l * exp_factor_los * ...
-                        a_psi_tb_n * conj(a_psi_bt_n') * a_tb * a_psi_tb_n * inner_product;
-            end
-        end
+        %             dmu = gamma_l * obj.h_l * exp_factor_los * ...
+        %                 a_psi_tb_n * conj(a_psi_bt_n') * a_tb * a_psi_tb_n * inner_product;
+        %     end
+        % end
         % ! -------------------- PEB COMPUTATION PART ENDS HERE --------------------        
 
     end
