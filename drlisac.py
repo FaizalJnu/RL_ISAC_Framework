@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -61,6 +61,7 @@ class Replay:
         done_batch = []
 
         batch = random.sample(self.buffer, batch_size)
+        print("we are finally here")
 
         for experience in batch:
             state, action, reward, next_state = experience
@@ -136,6 +137,15 @@ class DDPGagent:
         self.num_actions = num_actions
         self.disc_fact = disc_fact
         self.tau = tau
+        self.min_lr = min_lr
+
+        self.noise = OUNoise(action_dim=num_actions, 
+                        mu=0.0, 
+                        theta=0.15, 
+                        max_sigma=0.3, 
+                        min_sigma=0.1, 
+                        decay_period=10000)
+
 
         # Networks
         self.actor_eval = Actor(num_states, hidden_size_1, hidden_size_2, num_actions).to(self.device)
@@ -158,27 +168,50 @@ class DDPGagent:
         self.critic_criterion  = nn.MSELoss()
         self.actor_optimizer  = optim.Adam(self.actor_eval.parameters(), lr=actor_learning_rate)
         self.critic_optimizer = optim.Adam(self.critic_eval.parameters(), lr=critic_learning_rate)
-    
-    # def get_action(self, state):
-    #     state = torch.Variable(torch.from_numpy(state).float().unsqueeze(0))
-    #     #print(state.shape)
-    #     action = self.actor_eval.forward(state)
-    #     #print(action.shape)
-    #     action = action.detach().numpy()[0,0]
-  
-    #     return action.reshape((1, self.num_states))
-    
-    def select_action(self, state, explore, epsilon):
+
+        decay_gamma = 1.0 - lr_decay  # Convert your decay rate to scheduler's gamma
+        self.actor_scheduler = optim.lr_scheduler.ExponentialLR(
+            optimizer=self.actor_optimizer,
+            gamma=decay_gamma,
+        )
+        self.critic_scheduler = optim.lr_scheduler.ExponentialLR(
+            optimizer=self.critic_optimizer,
+            gamma=decay_gamma
+        )
+
+        self.current_actor_lr = actor_learning_rate
+        self.current_critic_lr = critic_learning_rate
+
+    def get_current_actor_lr(self):
+        return self.actor_optimizer.param_groups[0]['lr']
+
+    def select_action(self, state, explore, t=0):
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
+            action = self.actor_eval.forward(state)
+            action = action.cpu().numpy().squeeze()
+            
             if explore:
-                action = self.actor_eval.forward(state)
-                noise_scale = epsilon * np.random.normal(0, 1, size=action.shape)
-                action = torch.clamp(action + torch.FloatTensor(noise_scale).to(self.device), -1, 1)
+                noisy_action = self.noise.get_action(action, t)
+                return noisy_action
             else:
-                action = self.actor_eval.forward(state)
-        return action.cpu().numpy().squeeze()
+                return action
     
+    def decay_learning_rates(self):
+        # Step the schedulers
+        self.actor_scheduler.step()
+        self.critic_scheduler.step()
+        
+        # Enforce minimum learning rate
+        for param_group in self.actor_optimizer.param_groups:
+            param_group['lr'] = max(param_group['lr'], self.min_lr)
+        self.current_actor_lr = self.actor_optimizer.param_groups[0]['lr']
+        # print("Current actor learning rate:", self.current_actor_lr)  # Debug print
+        
+        for param_group in self.critic_optimizer.param_groups:
+            param_group['lr'] = max(param_group['lr'], self.min_lr)
+        self.current_critic_lr = self.critic_optimizer.param_groups[0]['lr']  
+
     def update(self, batch_size):
         if len(self.memory) < batch_size:
             return None, None  # Skip update if not enough data

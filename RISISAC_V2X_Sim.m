@@ -402,6 +402,8 @@ classdef RISISAC_V2X_Sim < handle
                 H_real, ... 
                 H_imag ...
             ];
+            disp(H_real);
+            disp(H_imag);
             state = real(state);
             state = state(:)';
             % disp(size(state));
@@ -451,7 +453,7 @@ classdef RISISAC_V2X_Sim < handle
         function [next_state, reward, peb, rate, power, done] = step(obj, action)
             % Update RIS phases based on action
             ris_phases = action(1:obj.Nr);  % values in [0, 1)
-            disp("this is the step: " + obj.stepCount);
+            % disp("this is the step: " + obj.stepCount);
             % disp(ris_phases);
             u = exp(1j * 2 * pi * ris_phases);  % convert to complex values on unit circle
             obj.phi = diag(u);  % assign to diagonal
@@ -1102,7 +1104,7 @@ classdef RISISAC_V2X_Sim < handle
             % zao = {tau_l, tau_nl, psi_rt, phi_rt_a, phi_rt_e, psi_bt, psi_tb};
             
             % Calculate scaling factor with normalization to prevent numerical issues
-            scaling_factor = -1;
+            scaling_factor = 10^6;
             % disp(scaling_factor);
             for i = 1:7
                 for j = 1:7
