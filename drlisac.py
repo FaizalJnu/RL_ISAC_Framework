@@ -48,9 +48,46 @@ class OUNoise(object):
 class Replay:
     def __init__(self, max_size):
         self.buffer = deque(maxlen=max_size)
+        self.reward_scale = 1.0  # Initial scaling factor
+        self.running_max_reward = 0.0  # Track maximum absolute reward
+        self.reward_scaling_factor = 1.1 
+    
+    def normalize_state(self, state):
+        """
+        Normalize state to [-1, 1] range
+        Implement based on your state components
+        """
+        # For your specific state structure (phase, rate, channel values)
+        # Assuming state is already a numpy array with proper shape
+        return np.clip(state, -1.0, 1.0)  # If values might exceed [-1, 1]
+
+    def normalize_action(self, action):
+        """
+        Normalize action to [-1, 1] range
+        """
+        return np.clip(action, -1.0, 1.0)
     
     def push(self, state, action, reward, next_state):
-        experience = (state, action, np.array([reward]), next_state)
+        # Normalize state if not already normalized
+        normalized_state = self.normalize_state(state)
+        
+        # Normalize action if not already normalized
+        normalized_action = self.normalize_action(action)
+        
+        # Normalize reward (often to [-1, 1])
+        self.running_max_reward = max(self.running_max_reward, abs(reward))
+        # Update reward scale with some margin
+        self.reward_scale = self.running_max_reward * self.reward_scaling_factor
+        
+        # Normalize reward (still store the raw reward for potential rescaling)
+        normalized_reward = reward / self.reward_scale if self.reward_scale > 0 else reward
+        
+        
+        # Normalize next_state
+        normalized_next_state = self.normalize_state(next_state)
+        
+        experience = (normalized_state, normalized_action, np.array([reward]), normalized_next_state, np.array([normalized_reward]))
+        
         self.buffer.append(experience)
 
     def sample(self, batch_size):
@@ -64,11 +101,13 @@ class Replay:
         print("we are finally here")
 
         for experience in batch:
-            state, action, reward, next_state = experience
+            state, action, raw_reward, next_state, normalized_reward = experience
+
+            current_normalized_reward = raw_reward / self.reward_scale if self.reward_scale > 0 else raw_reward
             #print(state.shape)
             state_batch.append(state)
             action_batch.append(action)
-            reward_batch.append(reward)
+            reward_batch.append(current_normalized_reward)
             next_state_batch.append(next_state)
             #done_batch.append(done)
         #print(state_batch)

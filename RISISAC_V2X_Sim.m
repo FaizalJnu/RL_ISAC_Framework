@@ -391,24 +391,42 @@ classdef RISISAC_V2X_Sim < handle
         % ! -------------------- MACHINE LEARNING PART STARTS HERE --------------------        
         function state = getState(obj)
             phi_real = real(diag(obj.phi))';
-            phi_imag = imag(diag(obj.phi))'; 
-            % Rc = obj.rate;
-            % Rc_norm = Rc / 1e8;
-            % disp(obj.phi);
+            phi_min = min(phi_real(:));
+            phi_max = max(phi_real(:));
+            phi_real = (phi_real-phi_min) / (phi_max-phi_min);
+            phi_real = phi_real*2 - 1;
+
+            phi_imag = imag(diag(obj.phi))';
+            phi_min = min(phi_imag(:));
+            phi_max = max(phi_imag(:));
+            phi_imag = (phi_imag-phi_min) / (phi_max-phi_min);
+            phi_imag = phi_imag*2 - 1;
             
             H = obj.H_combined;
-            % disp(obj.H_combined);
+            
             H_real = real(H(:))';
+            H_min = min(H_real(:));
+            H_max = max(H_real(:));
+            H_real = (H_real-H_min) / (H_max-H_min);
+            H_real = H_real*2 - 1;
+
             H_imag = imag(H(:))';
-            state = [
-                phi_real, ...
-                phi_imag, ...
-                H_real, ... 
-                H_imag ...
-            ];
+            H_min = min(H_imag(:));
+            H_max = max(H_imag(:));
+            H_imag = (H_imag-H_min) / (H_max-H_min);
+            H_imag = H_imag*2 - 1;
+
+            Rc = obj.rate;
+            Rc_norm = Rc / 1e8;
+            Rc_norm = Rc_norm / 5;
+            Rc_norm = Rc_norm*2 - 1;
+            % disp(obj.phi);
+            
+            state = [phi_real, phi_imag, Rc_norm, H_real, H_imag];
             % disp(H_real);
             % disp(H_imag);
-            state = real(state); state = state(:)';
+            state = real(state); 
+            state = state(:)';
 
             % if ~isfield(obj, 'state_mean') || ~isfield(obj, 'state_std')
             %     obj.state_mean = zeros(size(state));
@@ -1142,6 +1160,9 @@ classdef RISISAC_V2X_Sim < handle
                     end
                     
                     J_zao(i,j) = scaling_factor * sum_term;
+                    disp("for value of i: " + i);
+                    disp("for value of j:" + j);
+                    disp(J_zao(i,j));
                 end
             end
             % disp("this is jzao matrix: ");
