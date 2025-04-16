@@ -24,37 +24,37 @@ class RISISACTrainer:
         initial_state = self.eng.getState(self.sim)
         initial_state = np.array(initial_state).flatten()
         state_dim = len(initial_state)
-        action_dim = 64  # RIS phases (64) + throttle (1) + steering (1)
+        action_dim = 128  # RIS phases (64)
         print(f"Initializing FLDDPG with state_dim={state_dim}, action_dim={action_dim}")
         
         # Initialize DDPG agent with improved parameters
-        self.agent = FLDDPG(
-            state_dim=state_dim,
-            action_dim=action_dim,
-            hidden_dims=[512, 256],
-            buffer_size=10000,  # 𝒟 = 10000
-            batch_size=16,  # 𝑇ₘₐₓ = 16
-            gamma=0.95,  # γ_b = 0.95
-            tau=0.00001,  # τ_tc and τ_ta = 0.00001
-            actor_lr=0.001,  # μ_ta = 0.001
-            critic_lr=0.001,  # μ_tc = 0.001
-            lr_decay_rate=0.00001,  # λ_tc and λ_ta = 0.00001
-            min_lr=1e-6,  # Not explicitly in the table, but might be useful
-        )
-        
-        # self.agent = DDPGagent(
-        #     num_states= state_dim,
-        #     num_actions= action_dim,
-        #     hidden_size_1= 512,
-        #     hidden_size_2= 256,
-        #     max_memory_size= 10000,
-        #     disc_fact= 0.95,
-        #     tau= 0.00001,
-        #     actor_learning_rate= 0.001,
-        #     critic_learning_rate= 0.001,
-        #     lr_decay= 0.00001,
-        #     min_lr= 1e-6
+        # self.agent = FLDDPG(
+        #     state_dim=state_dim,
+        #     action_dim=action_dim,
+        #     hidden_dims=[512, 256],
+        #     buffer_size=10000,  # 𝒟 = 10000
+        #     batch_size=16,  # 𝑇ₘₐₓ = 16
+        #     gamma=0.95,  # γ_b = 0.95
+        #     tau=0.00001,  # τ_tc and τ_ta = 0.00001
+        #     actor_lr=0.001,  # μ_ta = 0.001
+        #     critic_lr=0.001,  # μ_tc = 0.001
+        #     lr_decay_rate=0.00001,  # λ_tc and λ_ta = 0.00001
+        #     min_lr=1e-6,  # Not explicitly in the table, but might be useful
         # )
+        
+        self.agent = DDPGagent(
+            num_states= state_dim,
+            num_actions= action_dim,
+            hidden_size_1= 512,
+            hidden_size_2= 256,
+            max_memory_size= 10000,
+            disc_fact= 0.95,
+            tau= 0.00001,
+            actor_learning_rate= 0.001,
+            critic_learning_rate= 0.001,
+            lr_decay= 0.00001,
+            min_lr= 1e-6
+        )
 
         
         # Initialize metrics tracking
@@ -199,7 +199,7 @@ class RISISACTrainer:
                 step_counter = step_counter + 1
                 # Select action with exploration
                 action = self.agent.select_action(state, explore, epsilon_start) 
-                action = (action+1)/2
+                # action = (action+1)/2
                 # Convert and execute action
                 matlab_action = matlab.double(action.tolist())
                 
@@ -221,8 +221,8 @@ class RISISACTrainer:
                 done = bool(done)
                 
                 # Store transition and update networks
-                self.agent.replay_buffer.push(state, action, reward, next_state, done)
-                actor_loss, critic_loss = self.agent.update()
+                self.agent.memory.push(state, action, reward, next_state)
+                actor_loss, critic_loss = self.agent.update(16)
                 
                 # Track step metrics
                 episode_reward += reward

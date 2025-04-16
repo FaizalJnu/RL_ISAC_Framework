@@ -392,8 +392,8 @@ classdef RISISAC_V2X_Sim < handle
         function state = getState(obj)
             phi_real = real(diag(obj.phi))';
             phi_imag = imag(diag(obj.phi))'; 
-            Rc = obj.rate;
-            Rc_norm = Rc / 1e8;
+            % Rc = obj.rate;
+            % Rc_norm = Rc / 1e8;
             % disp(obj.phi);
             
             H = obj.H_combined;
@@ -403,14 +403,12 @@ classdef RISISAC_V2X_Sim < handle
             state = [
                 phi_real, ...
                 phi_imag, ...
-                Rc_norm, ...
                 H_real, ... 
                 H_imag ...
             ];
             % disp(H_real);
             % disp(H_imag);
-            state = real(state);
-            state = state(:)';
+            state = real(state); state = state(:)';
 
             % if ~isfield(obj, 'state_mean') || ~isfield(obj, 'state_std')
             %     obj.state_mean = zeros(size(state));
@@ -472,12 +470,10 @@ classdef RISISAC_V2X_Sim < handle
         
         function [next_state, reward, peb, rate, power, done] = step(obj, action)
             % Update RIS phases based on action
-            ris_phases = action(1:obj.Nr);  % values in [0, 1)
-            % disp(ris_phases);
-            % disp("this is the step: " + obj.stepCount);
-            % disp(ris_phases);
-            u = exp(1j * 2 * pi * ris_phases);  % convert to complex values on unit circle
-            obj.phi = diag(u);  % assign to diagonal
+            realp = action(1:obj.Nr);
+            imagp = action(obj.Nr+1, 2*obj.Nr);
+            ris_phases = complex(realp, imagp); % values in [1, 1]
+            obj.phi = diag(ris_phases);  % assign to diagonal
             % fileID = fopen('phi_values.txt','w');
             % for i = 1:obj.Nr
             %     fprintf(fileID, '%f + %fj\n', real(u(i)), imag(u(i)));
