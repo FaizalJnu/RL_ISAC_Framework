@@ -154,8 +154,8 @@ class DDPGagent:
 
         # Networks
         self.actor_eval = Actor(num_states, hidden_size_1, hidden_size_2, num_actions, actor_learning_rate).to(self.device)
-        self.actor_target = Actor(num_states, hidden_size_1, hidden_size_2, num_actions).to(self.device)
-        self.critic_eval = Critic(num_states + num_actions, hidden_size_1, hidden_size_2, 1, actor_learning_rate).to(self.device)
+        self.actor_target = Actor(num_states, hidden_size_1, hidden_size_2, num_actions, actor_learning_rate).to(self.device)
+        self.critic_eval = Critic(num_states + num_actions, hidden_size_1, hidden_size_2, 1).to(self.device)
         self.critic_target = Critic(num_actions+num_states, hidden_size_1, hidden_size_2, 1).to(self.device)
 
         self.replay_buffer = Replay(

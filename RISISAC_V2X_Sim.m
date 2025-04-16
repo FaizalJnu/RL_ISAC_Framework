@@ -471,7 +471,8 @@ classdef RISISAC_V2X_Sim < handle
         function [next_state, reward, peb, rate, power, done] = step(obj, action)
             % Update RIS phases based on action
             realp = action(1:obj.Nr);
-            imagp = action(obj.Nr+1, 2*obj.Nr);
+            % disp(size(action))
+            imagp = action(obj.Nr+1:2*obj.Nr);
             ris_phases = complex(realp, imagp); % values in [1, 1]
             obj.phi = diag(ris_phases);  % assign to diagonal
             % fileID = fopen('phi_values.txt','w');
