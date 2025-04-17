@@ -311,9 +311,8 @@ classdef RISISAC_V2X_Sim < handle
 
         function a_phi = compute_a_phi(obj, Nx, phi_a, phi_e, lambda, dr)
             Ns = obj.Ns; % Number of subcarriers
-            B = obj.B;   % Bandwidth (Hz)
-            fc = obj.fc; % Carrier frequency (Hz)
-        
+            B = obj.B;   % Bandwidth (Hz) fc = obj.fc; % Carrier frequency (Hz)
+            fc = obj.fc;
             N2 = Nx * Nx;
             a_phi = zeros(N2, Ns); % Initialize output matrix
         
@@ -423,6 +422,10 @@ classdef RISISAC_V2X_Sim < handle
             % disp(obj.phi);
             
             state = [phi_real, phi_imag, Rc_norm, H_real, H_imag];
+            % disp("min value in State:");
+            % disp(min(state(:)));
+            % disp("max value in State:");
+            % disp(max(state(:)));
             % disp(H_real);
             % disp(H_imag);
             state = real(state); 
@@ -793,17 +796,19 @@ classdef RISISAC_V2X_Sim < handle
         function reward = computeReward(obj, peb)
             % Q = 0.5;
             constraints_satisfied = (obj.rate >= obj.R_min);
-
-            base_reward = 1 / peb;  % Keeps reward bounded [0,1]
-            n = rand(1);
             
+            base_reward = 1 / peb; 
+            
+            if base_reward > 1
+                base_reward = rand(1);
+            end
+            
+            n = rand(1);
             if ~constraints_satisfied
-                % reward = base_reward * (0.5 + 0.5 * (obj.rate / obj.R_min)); 
                 reward = base_reward * n;
             else
                 reward = base_reward;
             end
-
         end
         
         function state = reset(obj)
@@ -1079,8 +1084,7 @@ classdef RISISAC_V2X_Sim < handle
             % disp(J_zao);
             % Compute final Fisher Information Matrix
             J = T * J_zao * conj(T');
-            % disp("this is J: ");
-            % disp(J);
+            % disp("th
         end
 
         function [J_zao] = calculate_Jzao(obj, Pb_dbm, N, Wx, H_Los_3d, H_NLos_3d)
@@ -1140,7 +1144,7 @@ classdef RISISAC_V2X_Sim < handle
             % zao = {tau_l, tau_nl, psi_rt, phi_rt_a, phi_rt_e, psi_bt, psi_tb};
             
             % Calculate scaling factor with normalization to prevent numerical issues
-            scaling_factor = 10^6;
+            scaling_factor = -1;
             % disp(scaling_factor);
             for i = 1:7
                 for j = 1:7
@@ -1160,9 +1164,9 @@ classdef RISISAC_V2X_Sim < handle
                     end
                     
                     J_zao(i,j) = scaling_factor * sum_term;
-                    disp("for value of i: " + i);
-                    disp("for value of j:" + j);
-                    disp(J_zao(i,j));
+                    % disp("for value of i: " + i);
+                    % disp("for value of j:" + j);
+                    % disp(J_zao(i,j));
                 end
             end
             % disp("this is jzao matrix: ");
@@ -1175,18 +1179,19 @@ classdef RISISAC_V2X_Sim < handle
             % based on the channel model and parameter typ
             N = 10;
             freq_factor = (subcarrier_idx / N);
+            % A1 = gamma_l * obj.h_l * (1j * 2 * pi * obj.B * freq_factor) * exp(1j * 2 * pi * obj.B * freq_factor * tau_l);
+            % A2 = gamma_nl * obj.h_nl * (1j * 2 * pi * obj.B * freq_factor) * exp(1j * 2 * pi * obj.B * freq_factor * tau_nl);
+            A3 = gamma_nl * obj.h_nl * exp(1j * 2 * pi * obj.B * freq_factor * tau_nl);
+            A4 = gamma_l * obj.h_l * exp(1j * 2 * pi * obj.B * freq_factor * tau_l);
+
             if param_idx <= 2
                 % Time domain derivative (frequency domain multiplication)
                 % omega_n = 2*pi*subcarrier_idx; % Angular frequency
                 if param_idx == 1 % LoS delay
-                    dmu = gamma_l * obj.h_l * (1j * 2 * pi * obj.B * freq_factor) * ...
-                        exp(1j * 2 * pi * obj.B * freq_factor * tau_l) * ...
-                        a_psi_bt(:,subcarrier_idx) * conj(a_psi_tb(:,subcarrier_idx)') * Wx(:,subcarrier_idx);
+                    dmu =  A4 * a_psi_bt(:,subcarrier_idx) * conj(a_psi_tb(:,subcarrier_idx)') * Wx(:,subcarrier_idx);
 
                 else % NLoS delay
-                    dmu = gamma_nl * obj.h_nl * (1j * 2 * pi * obj.B * freq_factor) * ...
-                        exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
-                        a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * obj.phi * a_phi_abr(:,subcarrier_idx) * conj(a_psi_br(:,subcarrier_idx)') *...
+                    dmu = A3 * a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * obj.phi * a_phi_abr(:,subcarrier_idx) * conj(a_psi_br(:,subcarrier_idx)') *...
                         Wx(:, subcarrier_idx);
                 end
             % For angle parameters (param_idx 3-7)
@@ -1194,22 +1199,19 @@ classdef RISISAC_V2X_Sim < handle
                 % Different derivatives for different angle parameters
                 % (This is a placeholder - actual calculations would be model-specific)
                 if param_idx == 3 % psi_rt
-                    dmu = gamma_nl * obj.h_nl * ...
-                        exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
+                    dmu = A3 * ...
                         a_rt * a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * obj.phi * ...
                         a_phi_abr(:,subcarrier_idx) * conj(a_psi_br(:,subcarrier_idx)') * Wx(:, subcarrier_idx);
                 elseif param_idx == 4 % phi_rt_a
-                    dmu = gamma_nl * obj.h_nl * ...
-                        exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
+                    dmu = A3 * ...
                         a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * diag(a_rt_a) * obj.phi * ...
                         a_phi_abr(:,subcarrier_idx) * conj(a_psi_br(:,subcarrier_idx)') * Wx(:, subcarrier_idx);
                 elseif param_idx == 5 % phi_rt_e
-                    dmu = gamma_nl * obj.h_nl * ...
-                        exp(1j * 2 * pi * obj.B * freq_factor * tau_nl) * ...
+                    dmu = A3 * ...
                         a_psi_rt(:,subcarrier_idx) * conj(a_phi_art(:,subcarrier_idx)') * diag(a_rt_e) * obj.phi * a_phi_abr(:,subcarrier_idx) * ...
                         conj(a_psi_br(:,subcarrier_idx)')*Wx(:,subcarrier_idx);
                 elseif param_idx == 6 % psi_bt
-                    dmu = gamma_l * obj.h_l * exp(1j * 2 * pi * obj.B * freq_factor * tau_l) * ...
+                    dmu = A4 * ...
                         a_psi_tb(:,subcarrier_idx) * ...
                         conj(a_psi_bt(:,subcarrier_idx)') * ...
                         a_bt * ...
@@ -1217,7 +1219,7 @@ classdef RISISAC_V2X_Sim < handle
                         (a_psi_bt(:,subcarrier_idx)' * Wx(:, subcarrier_idx));
 
                 else % psi_tb
-                    dmu = gamma_l * obj.h_l * exp(1j * 2 * pi * obj.B * freq_factor * tau_l) * ...
+                    dmu = A4 * ...
                         a_psi_tb(:,subcarrier_idx) * ...
                         conj(a_psi_bt(:,subcarrier_idx)') * ...
                         a_tb * ...
