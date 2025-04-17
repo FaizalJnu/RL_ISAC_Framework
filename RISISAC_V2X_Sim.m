@@ -173,20 +173,12 @@ classdef RISISAC_V2X_Sim < handle
             obj.gamma_c = obj.Ns / sum(1 ./ gamma_c_per_subcarrier);  
             obj.SNR = 10 * log10(obj.gamma_c);
             gamma_c = obj.gamma_c;
-            % disp(gamma_c);
-            % disp("Power (Watts): " + obj.Pb);
-            % disp("Noise power: " + obj.sigma_c_sq_linear);
-            % disp("gamma_c_per_subcarrier: ");
-            % disp(gamma_c_per_subcarrier);
         end
 
         function Pb = getpower(obj)
             % Pb = trace(obj.Wx * obj.Wx') / obj.Ns;
-
             obj.Pb = 1;
-            % disp(Pb);
             obj.Pb_dbm = 30;
-
             Pb = obj.Pb;
 
         end
@@ -227,21 +219,17 @@ classdef RISISAC_V2X_Sim < handle
         function H_bt = generate_H_bt(obj, Nt, Nb, angles, lambda, d)
             psi_bt = angles.bs_to_target_transmit;
             psi_tb = angles.bs_to_target_receive;
-            
-            % Get frequency-dependent steering vectors (dimensions: Nb×Ns and Nt×Ns)
-            a_psi_bt = compute_a_psi(obj, Nb, psi_bt, lambda, d);
-            a_psi_tb = compute_a_psi(obj, Nt, psi_tb, lambda, d);
-            
-            % Initialize 3D channel matrix (Nt×Nb×Ns)
-            H_bt = zeros(Nt, Nb, obj.Ns);
-
-            
-            % Calculate H_bt for each subcarrier
-            for n = 1:obj.Ns
-                % Outer product of steering vectors for nth subcarrier
-                H_bt(:,:,n) = a_psi_tb(:,n) * a_psi_bt(:,n)';
-            end
-        end
+        
+            % Frequency-independent steering vectors (same for all subcarriers)
+            a_psi_bt = compute_a_psi(obj, Nb, psi_bt, lambda, d);  % (Nb × Ns)
+            a_psi_tb = compute_a_psi(obj, Nt, psi_tb, lambda, d);  % (Nt × Ns)
+        
+            % Outer product (identical across subcarriers)
+            H_single = a_psi_tb(:,1) * a_psi_bt(:,1)';  % Nt × Nb
+        
+            % Replicate for all subcarriers
+            H_bt = repmat(H_single, 1, 1, obj.Ns);      % Nt × Nb × Ns
+        end        
         
 
         function [H_br, H_rt] = generate_H_br_H_rt(obj, Nb, Nr, Nt, angles, lambda, d, dr)
@@ -261,127 +249,99 @@ classdef RISISAC_V2X_Sim < handle
         end
 
         function H_br = generate_H_br(obj, Nr, Nb, phi_abr, phi_ebr, psi_br, lambda, dr, d)
-            % Get frequency-dependent steering vectors (dimensions: Nb×Ns and Nr×Ns)
-            a_psi_br = compute_a_psi(obj, Nb, psi_br, lambda, d);
-            a_phi_abr = compute_a_phi(obj, sqrt(Nr), phi_abr, phi_ebr, lambda, dr);
-            
-            % Initialize 3D channel matrix (Nr×Nb×Ns)
-            H_br = zeros(Nr, Nb, obj.Ns);
-            
-            % Calculate H_br for each subcarrier
-            for n = 1:obj.Ns
-                % Outer product of steering vectors for nth subcarrier
-                H_br(:,:,n) = a_phi_abr(:,n) * a_psi_br(:,n)';
-            end
-        end
+            % Frequency-independent steering vectors
+            a_psi_br = compute_a_psi(obj, Nb, psi_br, lambda, d);                    % Nb × Ns
+            a_phi_abr = compute_a_phi(obj, sqrt(Nr), phi_abr, phi_ebr, lambda, dr); % Nr × Ns
         
+            % Outer product (same for all subcarriers)
+            H_single = a_phi_abr(:,1) * a_psi_br(:,1)';  % Nr × Nb
+        
+            % Replicate for all subcarriers
+            H_br = repmat(H_single, 1, 1, obj.Ns);       % Nr × Nb × Ns
+        end 
         
         function H_rt = generate_H_rt(obj, Nt, Nr, phi_art, phi_ert, psi_rt, lambda, dr, d)
-            % Get frequency-dependent steering vectors (dimensions: Nt×Ns and Nr×Ns)
-            a_psi_rt = compute_a_psi(obj, Nt, psi_rt, lambda, d);
-            a_phi_art = compute_a_phi(obj, sqrt(Nr), phi_art, phi_ert, lambda, dr);
-            
-            % Initialize 3D channel matrix (Nt×Nr×Ns)
-            H_rt = zeros(Nt, Nr, obj.Ns);
-            
-            % Calculate H_rt for each subcarrier
-            for n = 1:obj.Ns
-                % Outer product of steering vectors for nth subcarrier
-                H_rt(:,:,n) = a_psi_rt(:,n) * a_phi_art(:,n)';
-            end
+            % Frequency-independent steering vectors
+            a_psi_rt = compute_a_psi(obj, Nt, psi_rt, lambda, d);                    % Nt × Ns
+            a_phi_art = compute_a_phi(obj, sqrt(Nr), phi_art, phi_ert, lambda, dr); % Nr × Ns
+        
+            % Outer product (same for all subcarriers)
+            H_single = a_psi_rt(:,1) * a_phi_art(:,1)';  % Nt × Nr
+        
+            % Replicate for all subcarriers
+            H_rt = repmat(H_single, 1, 1, obj.Ns);       % Nt × Nr × Ns
         end
+        
 
         function a_vec = compute_a_psi(obj, Nant, psi, ~, d)
-            Ns = obj.Ns; % Number of subcarriers
-            B = obj.B;   % Bandwidth (Hz)
-            fc = obj.fc; % Carrier frequency (Hz)
-            
-            n_ant = (0:(Nant-1)).'; % antenna indices (column vector)
-            a_vec = zeros(Nant, Ns); % Initialize output matrix
-            
-            for n = 1:Ns
-                % Frequency of nth subcarrier (assuming centered around fc)
-                f_n = fc + B*(n - (Ns+1)/2)/Ns;
-                k_n = 2*pi*f_n/(3e8); % wavenumber at frequency f_n
-                
-                phase_terms = exp(1j * k_n * d * n_ant * sin(psi));
-                a_vec(:, n) = phase_terms / sqrt(Nant);
-            end
+            k = 2*pi*obj.fc / 3e8;         % Wavenumber at center frequency
+            n_ant = (0:(Nant-1)).';        % Antenna indices
+            a = exp(1j * k * d * n_ant * sin(psi)) / sqrt(Nant);
+            a_vec = repmat(a, 1, obj.Ns);  % Same steering vector across all subcarriers
         end
+        
 
         function a_phi = compute_a_phi(obj, Nx, phi_a, phi_e, lambda, dr)
-            Ns = obj.Ns; % Number of subcarriers
-            B = obj.B;   % Bandwidth (Hz) fc = obj.fc; % Carrier frequency (Hz)
             fc = obj.fc;
             N2 = Nx * Nx;
-            a_phi = zeros(N2, Ns); % Initialize output matrix
+            Ns = obj.Ns;
         
-            for n_subcarr = 1:Ns
-                % Frequency of nth subcarrier (assuming centered around fc)
-                f_n = fc + B*(n_subcarr - (Ns+1)/2)/Ns;
-                k_n = 2*pi*f_n/(3e8); % wavenumber at frequency f_n
+            k = 2 * pi * fc / 3e8;  % Wavenumber at center frequency
         
-                idx = 1;
-                for m_idx = 1:Nx
-                    for n_idx = 1:Nx
-                        phase_term = exp(1j * k_n * dr * ...
-                            (m_idx * sin(phi_a) * sin(phi_e) + n_idx * cos(phi_e)));
-                        a_phi(idx, n_subcarr) = phase_term;
-                        idx = idx + 1;
-                    end
+            a_phi_single = zeros(N2, 1);  % Steering vector at fc
+            idx = 1;
+            for m_idx = 1:Nx
+                for n_idx = 1:Nx
+                    phase_term = exp(1j * k * dr * ...
+                        (m_idx * sin(phi_a) * sin(phi_e) + n_idx * cos(phi_e)));
+                    a_phi_single(idx) = phase_term;
+                    idx = idx + 1;
                 end
-        
-                % Normalize per subcarrier
-                a_phi(:, n_subcarr) = a_phi(:, n_subcarr) / sqrt(N2);
             end
-        end      
         
-        function [H_Los, H_Los_3d] = generate_H_Los(obj, H_bt, Nt, Nb)            
-            gamma_l = sqrt(Nb*Nt)/sqrt(obj.rho_l);
-            
+            a_phi_single = a_phi_single / sqrt(N2);         % Normalize
+            a_phi = repmat(a_phi_single, 1, Ns);            % Copy across all subcarriers
+        end             
+        
+        function [H_Los, H_Los_3d] = generate_H_Los(obj, H_bt, Nt, Nb)
+            gamma_l = sqrt(Nb * Nt) / sqrt(obj.rho_l);
+        
             [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters(obj);
             tau_l = delays.line_of_sight;
-            
-            % Initialize 3D channel matrix (Nt×Nb×Ns)
+        
             H_Los_3d = zeros(Nt, Nb, obj.Ns);
-            
-            % Calculate H_Los for each subcarrier
+        
             for n = 1:obj.Ns
-                % Calculate phase shift for nth subcarrier
-                phase = exp(1j*2*pi*obj.B*(n/obj.Ns)*tau_l);
-                
-                % H_bt is now a 3D matrix, so we use H_bt(:,:,n)
+                phase = exp(1j * 2 * pi * obj.B * (n / obj.Ns) * tau_l);
                 H_Los_3d(:,:,n) = gamma_l * obj.h_l * H_bt(:,:,n) * phase;
             end
-            % Return both the 3D channel matrix and its average
-            H_Los = mean(H_Los_3d, 3);  % Average across subcarriers (Nt×Nb matrix)
-            % disp("this is HLos");
-            % disp(H_Los);
+        
+            H_Los = mean(H_Los_3d, 3);  % Averaged channel
         end
         
-        function [H_NLoS, H_NLoS_3d] = generate_H_NLoS(obj, H_rt, H_br, Nt, Nr, Nb, phi)            
-            obj.rho_nl = 4;
-            
-            gamma_nl = sqrt(Nb*Nr)/sqrt(obj.rho_nl);
-            
-            [~,~,~,~, ~, ~, delays, ~] = computeGeometricParameters(obj);
+        
+        function [H_NLoS, H_NLoS_3d] = generate_H_NLoS(obj, H_rt, H_br, Nt, Nr, Nb, phi)
+            obj.rho_nl = 4;  % Set if not already set externally
+        
+            gamma_nl = sqrt(Nb * Nr) / sqrt(obj.rho_nl);
+        
+            [~, ~, ~, ~, ~, ~, delays, ~] = computeGeometricParameters(obj);
             tau_nl = delays.non_line_of_sight;
-            
-            % Initialize 3D channel matrix (Nt×Nb×Ns)
+        
             H_NLoS_3d = zeros(Nt, Nb, obj.Ns);
-            
-            % Calculate H_NLoS for each subcarrier
+        
             for n = 1:obj.Ns
-                phase = exp(1j*2*pi*obj.B*(n/obj.Ns)*tau_nl);
+                % Frequency-dependent phase shift
+                phase = exp(1j * 2 * pi * obj.B * (n / obj.Ns) * tau_nl);
+                
+                % NLoS channel: Tx → RIS → Rx
                 H_NLoS_3d(:,:,n) = gamma_nl * obj.h_nl * H_rt(:,:,n) * phi * H_br(:,:,n) * phase;
             end
-            
-            % Return both the 3D channel matrix and its average
-            H_NLoS = mean(H_NLoS_3d, 3);  % Average across subcarriers (Nt×Nb matrix)
-            % disp("this is HNlos");
-            % disp(H_NLoS);
-
+        
+            % Mean over subcarriers (narrowband equivalent)
+            H_NLoS = mean(H_NLoS_3d, 3);
         end
+        
                
         
 
