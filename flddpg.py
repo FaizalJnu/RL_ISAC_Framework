@@ -402,12 +402,12 @@ class FLDDPG:
         self.gamma = gamma
         self.batch_size = batch_size
         
-        self.replay_buffer = ReplayBuffer(
+        self.replay_buffer = PrioritizedReplayBuffer(
             capacity=buffer_size,
-            state_dim=state_dim
-            # alpha=0.6,  # Priority exponent
-            # beta=0.4,   # Initial importance sampling weight
-            # beta_increment=0.001  # Beta annealing rate
+            state_dim=state_dim,
+            alpha=0.6,  # Priority exponent
+            beta=0.4,   # Initial importance sampling weight
+            beta_increment=0.001  # Beta annealing rate
         )
         
         # Learning rate settings
@@ -461,83 +461,83 @@ class FLDDPG:
                 action = self.actor(state)
         return action.cpu().numpy().squeeze()
 
-    def update(self):
-        if len(self.replay_buffer) < self.batch_size * 3:
-            return 0, 0
-        state_batch, action_batch, reward_batch, next_state_batch, done_batch = self.replay_buffer.sample(self.batch_size)
-        state_batch = state_batch.to(self.device)
-        action_batch = action_batch.to(self.device)
-        reward_batch = reward_batch.to(self.device)
-        next_state_batch = next_state_batch.to(self.device)
-        done_batch = done_batch.to(self.device)
-        
-        with torch.no_grad():
-            next_actions = self.target_actor(next_state_batch)
-            target_q = reward_batch + self.gamma * self.target_critic(next_state_batch, next_actions)
-        
-        current_q = self.critic(state_batch, action_batch)
-        critic_loss = torch.nn.MSELoss()(current_q, target_q)
-
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
-        self.critic_optimizer.step()
-
-        actor_loss = -self.critic(state_batch, self.actor(state_batch)).mean()
-        
-        self.actor_optimizer.zero_grad()
-        actor_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
-        self.actor_optimizer.step()
-
-        self.target_actor.soft_update()
-        self.target_critic.soft_update()
-        
-        return actor_loss.item(), critic_loss.item()
-
     # def update(self):
     #     if len(self.replay_buffer) < self.batch_size * 3:
     #         return 0, 0
-        
-    #     # Sample batch with importance sampling weights and indices
-    #     state_batch, action_batch, reward_batch, next_state_batch, done_batch, weights, indices = self.replay_buffer.sample(self.batch_size)
-        
+    #     state_batch, action_batch, reward_batch, next_state_batch, done_batch = self.replay_buffer.sample(self.batch_size)
     #     state_batch = state_batch.to(self.device)
     #     action_batch = action_batch.to(self.device)
     #     reward_batch = reward_batch.to(self.device)
     #     next_state_batch = next_state_batch.to(self.device)
     #     done_batch = done_batch.to(self.device)
-    #     weights = weights.to(self.device)
         
     #     with torch.no_grad():
     #         next_actions = self.target_actor(next_state_batch)
     #         target_q = reward_batch + self.gamma * self.target_critic(next_state_batch, next_actions)
         
     #     current_q = self.critic(state_batch, action_batch)
-        
-    #     # Calculate TD errors for updating priorities
-    #     td_errors = torch.abs(target_q - current_q).detach().cpu().numpy()
-        
-    #     # Apply importance sampling weights to the critic loss
-    #     critic_loss = (weights * (current_q - target_q)**2).mean()
-        
+    #     critic_loss = torch.nn.MSELoss()(current_q, target_q)
+
     #     self.critic_optimizer.zero_grad()
     #     critic_loss.backward()
     #     torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
     #     self.critic_optimizer.step()
-        
-    #     # Update priorities in the replay buffer
-    #     self.replay_buffer.update_priorities(indices, td_errors)
-        
-    #     # Actor loss remains the same (no need for importance sampling here)
+
     #     actor_loss = -self.critic(state_batch, self.actor(state_batch)).mean()
         
     #     self.actor_optimizer.zero_grad()
     #     actor_loss.backward()
     #     torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
     #     self.actor_optimizer.step()
-        
+
     #     self.target_actor.soft_update()
     #     self.target_critic.soft_update()
         
     #     return actor_loss.item(), critic_loss.item()
+
+    def update(self):
+        if len(self.replay_buffer) < self.batch_size * 3:
+            return 0, 0
+        
+        # Sample batch with importance sampling weights and indices
+        state_batch, action_batch, reward_batch, next_state_batch, done_batch, weights, indices = self.replay_buffer.sample(self.batch_size)
+        
+        state_batch = state_batch.to(self.device)
+        action_batch = action_batch.to(self.device)
+        reward_batch = reward_batch.to(self.device)
+        next_state_batch = next_state_batch.to(self.device)
+        done_batch = done_batch.to(self.device)
+        weights = weights.to(self.device)
+        
+        with torch.no_grad():
+            next_actions = self.target_actor(next_state_batch)
+            target_q = reward_batch + self.gamma * self.target_critic(next_state_batch, next_actions)
+        
+        current_q = self.critic(state_batch, action_batch)
+        
+        # Calculate TD errors for updating priorities
+        td_errors = torch.abs(target_q - current_q).detach().cpu().numpy()
+        
+        # Apply importance sampling weights to the critic loss
+        critic_loss = (weights * (current_q - target_q)**2).mean()
+        
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
+        self.critic_optimizer.step()
+        
+        # Update priorities in the replay buffer
+        self.replay_buffer.update_priorities(indices, td_errors)
+        
+        # Actor loss remains the same (no need for importance sampling here)
+        actor_loss = -self.critic(state_batch, self.actor(state_batch)).mean()
+        
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
+        self.actor_optimizer.step()
+        
+        self.target_actor.soft_update()
+        self.target_critic.soft_update()
+        
+        return actor_loss.item(), critic_loss.item()

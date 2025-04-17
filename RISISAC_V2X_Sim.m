@@ -777,22 +777,26 @@ classdef RISISAC_V2X_Sim < handle
         % end        
 
         function reward = computeReward(obj, peb)
-            % Q = 0.5;
             constraints_satisfied = (obj.rate >= obj.R_min);
             
-            base_reward = 1 / peb; 
-            
-            if base_reward == Inf
-                base_reward = rand(1);
+            % disp("this is the current step " + obj.stepCount);
+            % disp("this is the current peb " + peb);
+            if peb > 0.1
+                base_reward = 1 / peb;
+            else
+                base_reward = 10 + (1.8 - 10) * (0.1 - peb) / 0.1;
             end
-            
-            n = rand(1);
+        
             if ~constraints_satisfied
+                n = rand();
                 reward = base_reward * n;
             else
                 reward = base_reward;
             end
+            reward = min(1.8, reward);
+            % disp("this is the reward " + reward);
         end
+        
         
         function state = reset(obj)
             % Reset simulation state
