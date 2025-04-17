@@ -130,7 +130,7 @@ class ReplayBuffer:
     def sample(self, batch_size):
         if len(self.buffer) < batch_size:
             raise ValueError(f"Not enough samples in buffer ({len(self.buffer)}) to sample batch of {batch_size}")
-        print("this is the first time we are entering here")
+        # print("this is the first time we are entering here")
             
         batch = random.sample(self.buffer, batch_size)
         state, action, reward, next_state, done = zip(*batch)
