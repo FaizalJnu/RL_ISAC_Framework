@@ -29,9 +29,10 @@ classdef RISISAC_V2X_Sim < handle
         speed = 10
         end_x = 1000
         Pb = 0
+        J
         R_min = 0
         H_combined
-        Jzao
+        J_zao
         waypoint_idx = 1;
         state_mean
         state_std
@@ -86,6 +87,7 @@ classdef RISISAC_V2X_Sim < handle
 
         minpeb = 10000;
         peb = 0;
+        episodeCount = 0;
 
         visualizationAxes;
         trajectory = [];
@@ -436,42 +438,77 @@ classdef RISISAC_V2X_Sim < handle
         function pzc = getpebzero(obj)
             pzc = obj.peb_zero;
         end
+
+        function log_step_metrics(obj, action, reward, peb, rate, power)
+            % Create filename based on current episode number
+            filename = sprintf('Episode_%04d_log.txt', obj.episodeCount); 
+            
+            % Open file in append mode
+            fid = fopen(filename, 'a');
+        
+            % Write current step number
+            fprintf(fid, 'Step %d:\n', obj.stepCount);
+        
+            % Write metrics in readable form
+            fprintf(fid, 'Reward: %.6f\n', reward);
+            fprintf(fid, 'PEB: %.6f\n', peb);
+            fprintf(fid, 'Rate: %.6f bps/Hz\n', rate);
+            fprintf(fid, 'Power: %.6f dBm\n', power);
+        
+            % Write action vector
+            fprintf(fid, 'Action: [');
+            fprintf(fid, '%.4f ', action);
+            fprintf(fid, ']\n');
+
+            fprintf(fid, 'Jzao: [');
+            fprintf(fid, '%.4f ', obj.J_zao);
+            fprintf(fid, ']\n');
+
+            fprintf(fid, 'H_combined: [');
+            fprintf(fid, '%.4f ', obj.H_combined);
+            fprintf(fid, ']\n');
+            
+            fprintf(fid, 'Fisher Information Matrix: [');
+            fprintf(fid, '%.4f ', obj.J);
+            fprintf(fid, ']\n');
+        
+            % Add separator
+            fprintf(fid, '--------------------------------------------\n\n');
+        
+            fclose(fid);
+        end        
         
         function [next_state, reward, peb, rate, power, done] = step(obj, action)
-            
+            % == Phase calculation ==
             ris_phases = action(1:64); % values in [-1, 1]
             normalized_phases = (ris_phases + 1) / 2; % now in [0, 1]
             u = exp(1j*2*pi*normalized_phases);
             obj.phi = diag(u);          
-            % fileID = fopen('phi_values.txt','w');
-            % for i = 1:obj.Nr
-            %     fprintf(fileID, '%f + %fj\n', real(u(i)), imag(u(i)));
-            % end
-            % fclose(fileID);
-            % disp(obj.phi);
+        
+            % == Channel generation ==
             [H_Los, H_Los_3d] = generate_H_Los(obj, obj.H_bt, obj.Nt, obj.Nb);
             [H_NLos, H_NLos_3d] = generate_H_NLoS(obj, obj.H_rt, obj.H_br, obj.Nt, obj.Nr, obj.Nb, obj.phi);
             obj.H_combined = compute_Heff(obj, H_Los, H_NLos);
             [obj.Wx, obj.W] = computeWx(obj);
+        
+            % == Power & metrics ==
             power = getpower(obj);
             obj.Pb = power;
             power = obj.Pb_dbm;
             obj.gamma_c = computeSNR(obj);
             rate = getrate(obj);
             obj.rate = rate;
+        
+            % == PEB and Reward ==
             peb = obj.calculatePerformanceMetrics(obj.Wx, H_Los_3d, H_NLos_3d);
-            % disp("step" + obj.stepCount);
-            % disp("peb" + peb);
-            % disp("action in during this step: ");
-            % disp(action);
             obj.peb = peb;
             if peb == 0
                 obj.peb_zero = obj.peb_zero + 1;
             end
-
-            % Compute reward
             reward = abs(obj.computeReward(peb));
         
+            % == Logging ==
+            log_step_metrics(obj, action, reward, peb, rate, power);
             % Initialize position once per episode
             persistent isInitialized;
             if isempty(isInitialized) || obj.stepCount == 0
@@ -784,8 +821,7 @@ classdef RISISAC_V2X_Sim < handle
             obj.target_loc = obj.car_loc;
             obj.time = 0;
             obj.stepCount = 0;
-
-            
+            obj.episodeCount = obj.episodeCount + 1;
             % Return the current state
             state = obj.getState();
         end
@@ -887,17 +923,16 @@ classdef RISISAC_V2X_Sim < handle
 
         function [peb] = calculatePerformanceMetrics(obj, Wx, H_Los_3d, H_NLos_3d)
             [J, ~, ~] = computeFisherInformationMatrix(obj,Wx, H_Los_3d, H_NLos_3d);
-
+            epsilon = 1e-6;
+            J = (J + J') / 2;  % make Hermitian
+            eigvals = eig(J);
+            if min(eigvals) < 0
+                J = J + epsilon * eye(size(J));  % regularize
+            end
             CRLB = inv(J);
             obj.peb = sqrt(trace(CRLB));
             obj.peb = real(obj.peb);
             peb = obj.peb;
-            % disp("this is CRLB");
-            % disp(CRLB)
-            % disp("this is peb: " + peb);
-            % disp("this is J matrix: ");
-            % disp(J);
-            % disp(peb);
         end
         
         function [T] = computeTransformationMatrix(obj)
@@ -1040,7 +1075,7 @@ classdef RISISAC_V2X_Sim < handle
             % disp(J_zao);
             % Compute final Fisher Information Matrix
             J = T * J_zao * conj(T');
-            % disp("th
+            obj.J = J;
         end
 
         function [J_zao] = calculate_Jzao(obj, Pb_dbm, N, Wx, H_Los_3d, H_NLos_3d)
@@ -1084,23 +1119,9 @@ classdef RISISAC_V2X_Sim < handle
 
             a_rt_a = 1j * (2 * pi / obj.lambda) * (obj.lambda/2) * ((obj.Nx - 1) * cos(phi_art) * sin(phi_ert));
             a_rt_e = 1j * (2 * pi / obj.lambda) * (obj.lambda/2) * ((obj.Nx - 1) * sin(phi_art) * cos(phi_ert) - (obj.Ny - 1) * sin(phi_ert));
-
-            % % --- BEGIN INSERTED PRINT STATEMENTS ---
-            % disp('--- Extracted Geometric Parameters ---');
-            % fprintf('  psi_rt (RIS->Target AoA):      %f\n', psi_rt);
-            % fprintf('  psi_bt (BS->Target Transmit Angle): %f\n', psi_bt); % Clarify if AoA/AoD
-            % fprintf('  psi_tb (Target->BS Receive Angle): %f\n', psi_tb); % Clarify if AoA/AoD
-            % fprintf('  phi_rt_a (RIS->Target Azimuth): %f\n', phi_art);
-            % fprintf('  phi_rt_e (RIS->Target Elevation):%f\n', phi_ert);
-            % fprintf('  tau_l (LoS Delay):             %g\n', tau_l);  % %g is good for delays which might be small
-            % fprintf('  tau_nl (NLoS Delay):           %g\n', tau_nl);
-            % disp('------------------------------------');
-            % % --- END INSERTED PRINT STATEMENTS ---
-
-            % zao = {tau_l, tau_nl, psi_rt, phi_rt_a, phi_rt_e, psi_bt, psi_tb};
             
             % Calculate scaling factor with normalization to prevent numerical issues
-            scaling_factor = -1;
+            scaling_factor = 1;
             % disp(scaling_factor);
             for i = 1:7
                 for j = 1:7
@@ -1125,8 +1146,7 @@ classdef RISISAC_V2X_Sim < handle
                     % disp(J_zao(i,j));
                 end
             end
-            % disp("this is jzao matrix: ");
-            % disp(J_zao);
+            obj.J_zao = J_zao;
         end
         
         % Helper function for calculating derivatives
