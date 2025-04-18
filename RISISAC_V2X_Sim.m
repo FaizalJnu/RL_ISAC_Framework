@@ -35,6 +35,7 @@ classdef RISISAC_V2X_Sim < handle
         waypoint_idx = 1;
         state_mean
         state_std
+        peb_zero = 0
 
         currentWaypointIndex = 1;   % Start from the first waypoint
         reachedWaypoint = true;     % Ensure path planning starts immediately
@@ -431,14 +432,17 @@ classdef RISISAC_V2X_Sim < handle
         function updateTrajectory(obj)
             obj.trajectory = [obj.trajectory; obj.car_loc];
         end        
+
+        function pzc = getpebzero(obj)
+            pzc = obj.peb_zero;
+        end
         
         function [next_state, reward, peb, rate, power, done] = step(obj, action)
-            % Update RIS phases based on action
-            realp = action(1:obj.Nr);
-            % disp(size(action))
-            imagp = action(obj.Nr+1:2*obj.Nr);
-            ris_phases = complex(realp, imagp); % values in [1, 1]
-            obj.phi = diag(ris_phases);  % assign to diagonal
+            
+            ris_phases = action(1:64); % values in [-1, 1]
+            normalized_phases = (ris_phases + 1) / 2; % now in [0, 1]
+            u = exp(1j*2*pi*normalized_phases);
+            obj.phi = diag(u);          
             % fileID = fopen('phi_values.txt','w');
             % for i = 1:obj.Nr
             %     fprintf(fileID, '%f + %fj\n', real(u(i)), imag(u(i)));
@@ -458,8 +462,13 @@ classdef RISISAC_V2X_Sim < handle
             peb = obj.calculatePerformanceMetrics(obj.Wx, H_Los_3d, H_NLos_3d);
             % disp("step" + obj.stepCount);
             % disp("peb" + peb);
+            % disp("action in during this step: ");
+            % disp(action);
             obj.peb = peb;
-            
+            if peb == 0
+                obj.peb_zero = obj.peb_zero + 1;
+            end
+
             % Compute reward
             reward = abs(obj.computeReward(peb));
         
